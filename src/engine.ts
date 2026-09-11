@@ -210,8 +210,13 @@ export class TinyToolEngine {
     const stubbedTools: ToolSchema[] = tools.map(tool => {
       const entry = this.catalog.get(tool.name)
       if (entry === undefined) {
-        // Tool not in catalog — keep as-is to avoid losing it
-        return tool
+        // Tool not in catalog — still truncate description and add warning
+        const desc = (tool.description ?? '') as string
+        return {
+          name: tool.name,
+          description: extractFirstSentence(desc) + ' Must use tool_describe before first usage!',
+          parameters: tool.parameters,
+        }
       }
       if (this.isExempt(entry.name)) {
         return { name: entry.name, description: entry.description, parameters: entry.parameters as ToolSchema['parameters'] }
