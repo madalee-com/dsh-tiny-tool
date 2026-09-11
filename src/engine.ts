@@ -45,9 +45,18 @@ function minifySchema(schema: unknown): unknown {
     return minified
   }
 
+  // Strip descriptive keys from root before recursing
+  const keepKeys = new Set(['type', 'properties', 'items', 'required', 'oneOf', 'allOf', 'anyOf', 'additionalProperties', 'pattern', 'format', 'minimum', 'maximum', 'default', 'enum', 'const', 'title', 'examples'])
+  const stripped: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(obj)) {
+    if (!['description', 'title', 'examples', 'pattern', 'format'].includes(k)) {
+      stripped[k] = v
+    }
+  }
+
   // Object with properties: recurse into each property
-  if ('properties' in obj && Array.isArray(obj.properties)) {
-    const minified: Record<string, unknown> = { ...obj }
+  if ('properties' in stripped && Array.isArray(stripped.properties)) {
+    const minified = { ...stripped }
     if (Array.isArray(minified.properties)) {
       minified.properties = minified.properties.map(p => minifySchema(p))
     }
@@ -55,9 +64,9 @@ function minifySchema(schema: unknown): unknown {
   }
 
   // Object with properties map
-  if ('properties' in obj && typeof obj.properties === 'object' && obj.properties !== null) {
-    const minified: Record<string, unknown> = { ...obj }
-    const props = obj.properties as Record<string, unknown>
+  if ('properties' in stripped && typeof stripped.properties === 'object' && stripped.properties !== null) {
+    const minified = { ...stripped }
+    const props = stripped.properties as Record<string, unknown>
     const minifiedProps: Record<string, unknown> = {}
     for (const [key, value] of Object.entries(props)) {
       minifiedProps[key] = minifySchema(value)
@@ -67,17 +76,17 @@ function minifySchema(schema: unknown): unknown {
   }
 
   // Array items
-  if ('items' in obj) {
-    const minified: Record<string, unknown> = { ...obj }
-    minified.items = minifySchema(obj.items)
+  if ('items' in stripped) {
+    const minified = { ...stripped }
+    minified.items = minifySchema(stripped.items)
     return minified
   }
 
   // Union schemas
   for (const key of ['oneOf', 'allOf', 'anyOf'] as const) {
-    if (key in obj && Array.isArray(obj[key])) {
-      const minified: Record<string, unknown> = { ...obj }
-      minified[key] = obj[key].map(s => minifySchema(s))
+    if (key in stripped && Array.isArray(stripped[key])) {
+      const minified = { ...stripped }
+      minified[key] = stripped[key].map(s => minifySchema(s))
       return minified
     }
   }
