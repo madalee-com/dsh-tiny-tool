@@ -99,12 +99,13 @@ export class TinyToolEngine {
         this.exemptTools.add(name)
       }
     }
-    this.snapshotCatalog()
+    // Register the assemble hook explicitly
+    ctx.on('system-prompt/assemble', this.assemble.bind(this))
   }
 
   /**
    * Capture the current full tool catalog from the registry.
-   * Runs once at construction; subsequent tool additions are not captured.
+   * Runs on each assemble() call to ensure tools are registered before capture.
    */
   private snapshotCatalog(): void {
     const schemas = this.ctx.tools.schemas(undefined)
@@ -157,10 +158,20 @@ export class TinyToolEngine {
    * @returns the transformed assembly.
    */
   async assemble(assembly: PromptAssembly, _scope?: unknown): Promise<PromptAssembly> {
+    // Re-snapshot catalog fresh on each assemble to catch all registered tools
+    this.snapshotCatalog()
+    console.log(`[dsh-tiny-tool] assemble called, catalog size: ${this.catalog.size}, assembly tools: ${assembly.tools?.length ?? 0}`)
     if (this.catalog.size === 0) return assembly
-    // Replace every tool with a minimum version to save context tokens,
-    // except for exempted tools which keep their full schema.
-    const stubbedTools: ToolSchema[] = [...this.catalog.values()].map(entry => {
+    // Transform tools in-place: use assembly.tools as source of truth,
+    // falling back to catalog for any tools not in the assembly.
+    // This prevents losing tools if the catalog is incomplete.
+    const tools = assembly.tools ?? []
+    const stubbedTools: ToolSchema[] = tools.map(tool => {
+      const entry = this.catalog.get(tool.name)
+      if (entry === undefined) {
+        // Tool not in catalog — keep as-is to avoid losing it
+        return tool
+      }
       if (this.exemptTools.has(entry.name)) {
         return { name: entry.name, description: entry.description, parameters: entry.parameters as ToolSchema['parameters'] }
       }
@@ -170,6 +181,16 @@ export class TinyToolEngine {
         parameters: minifySchema(entry.parameters) as ToolSchema['parameters'],
       }
     })
+    // Also include any catalog tools not in the assembly (edge case)
+    for (const entry of this.catalog.values()) {
+      if (!tools.some(t => t.name === entry.name)) {
+        stubbedTools.push({
+          name: entry.name,
+          description: this.exemptTools.has(entry.name) ? entry.description : '',
+          parameters: minifySchema(entry.parameters) as ToolSchema['parameters'],
+        })
+      }
+    }
     return { ...assembly, tools: stubbedTools }
   }
 }

@@ -30,7 +30,7 @@ export declare class TinyToolEngine {
     constructor(ctx: Context, config?: TinyToolConfig);
     /**
      * Capture the current full tool catalog from the registry.
-     * Runs once at construction; subsequent tool additions are not captured.
+     * Runs on each assemble() call to ensure tools are registered before capture.
      */
     private snapshotCatalog;
     /**
