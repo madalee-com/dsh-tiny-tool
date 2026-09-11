@@ -39,7 +39,7 @@ Add to your DSH profile's `package.json`:
 
 ## Configuration
 
-Add the cordis patch directly to your `cordis.patch.yml`:
+Add the cordis patch directly to your profile's `cordis.patch.yml` (e.g. `~/.dsh/profiles/web/cordis.patch.yml`):
 
 ```yaml
 - insert:
