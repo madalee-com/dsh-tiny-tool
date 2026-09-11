@@ -85,10 +85,10 @@ function minifySchema(schema: unknown): unknown {
   return schema
 }
 /**
- * Extract the first sentence from a description (up to the first period).
+ * Extract the first sentence from a description, including its terminating punctuation.
  */
 function extractFirstSentence(description: string): string {
-  const match = description.match(/^([^.]*[^.\s])/)
+  const match = description.match(/^([^.*!?]*[.!?])/)
   return match?.[1] ?? ''
 }
 
