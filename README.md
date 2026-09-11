@@ -54,6 +54,15 @@ Add the cordis patch directly to your profile's `cordis.patch.yml` (e.g. `~/.dsh
 
 Tools in `exemptTools` will keep their full descriptions and parameters in the system prompt.
 
+You can also use `exemptPrefixes` to exempt all tools matching a name prefix:
+
+```yaml
+config:
+  exemptPrefixes:
+    - mnemon_
+    - gitea_
+```
+
 ## Building
 
 ```bash
