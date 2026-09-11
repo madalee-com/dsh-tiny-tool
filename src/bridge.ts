@@ -58,7 +58,7 @@ export function registerBridgeTools(ctx: Context, engine: TinyToolEngine) {
     })),
     ctx.tools.register(defineTool({
       name: 'tool_describe',
-      description: 'Load the full schema (parameters and description) of one deferred tool by name.',
+      description: 'Always use to get tool descriptions or argument details.',
       parameters: {
         name: { type: 'string', required: true },
       },
