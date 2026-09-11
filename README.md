@@ -29,7 +29,7 @@ Tools in this list will keep their full descriptions and parameters in the syste
 ### Via dsh plugin install
 
 ```bash
-dsh plugin install --profile web dsh-tiny-tool
+dsh plugin install --profile web github:madalee-com/dsh-tiny-tool
 ```
 
 ### Manual installation
