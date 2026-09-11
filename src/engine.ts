@@ -20,6 +20,8 @@ export interface CatalogEntry {
 export interface TinyToolConfig {
   /** Tool names to keep fully visible (do not hide descriptions). */
   exemptTools?: string[]
+  /** Tool name prefixes to keep fully visible (e.g. ['mnemon_']). */
+  exemptPrefixes?: string[]
 }
 
 /**
@@ -91,6 +93,7 @@ export class TinyToolEngine {
   private readonly ctx: Context
   private readonly catalog = new Map<string, CatalogEntry>()
   private readonly exemptTools = new Set<string>()
+  private readonly exemptPrefixes = new Set<string>()
 
   constructor(ctx: Context, config: TinyToolConfig = {}) {
     this.ctx = ctx
@@ -99,8 +102,24 @@ export class TinyToolEngine {
         this.exemptTools.add(name)
       }
     }
+    if (config.exemptPrefixes) {
+      for (const prefix of config.exemptPrefixes) {
+        this.exemptPrefixes.add(prefix)
+      }
+    }
     // Register the assemble hook explicitly
     ctx.on('system-prompt/assemble', this.assemble.bind(this))
+  }
+
+  /**
+   * Check if a tool name should be exempt from minification.
+   */
+  private isExempt(name: string): boolean {
+    if (this.exemptTools.has(name)) return true
+    for (const prefix of this.exemptPrefixes) {
+      if (name.startsWith(prefix)) return true
+    }
+    return false
   }
 
   /**
@@ -174,7 +193,7 @@ export class TinyToolEngine {
         // Tool not in catalog — keep as-is to avoid losing it
         return tool
       }
-      if (this.exemptTools.has(entry.name)) {
+      if (this.isExempt(entry.name)) {
         return { name: entry.name, description: entry.description, parameters: entry.parameters as ToolSchema['parameters'] }
       }
       return {
@@ -188,7 +207,7 @@ export class TinyToolEngine {
       if (!tools.some(t => t.name === entry.name)) {
         stubbedTools.push({
           name: entry.name,
-          description: this.exemptTools.has(entry.name) ? entry.description : '',
+          description: this.isExempt(entry.name) ? entry.description : '',
           parameters: minifySchema(entry.parameters) as ToolSchema['parameters'],
         })
       }
