@@ -59,9 +59,10 @@ You can also use `exemptPrefixes` to exempt all tools matching a name prefix:
 ```yaml
 config:
   exemptPrefixes:
-    - mnemon_
     - gitea_
 ```
+
+**Subagent detection**: Tool schemas are automatically preserved (not minified) when the plugin runs in a subagent context. This is detected by checking `agent.options.subagentDepth` or `agent.session.header.delegationDepth` — if either is > 0, the agent is a subagent child and full tool schemas are used.
 
 ## Building
 
