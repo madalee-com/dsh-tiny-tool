@@ -160,7 +160,6 @@ export class TinyToolEngine {
   async assemble(assembly: PromptAssembly, _scope?: unknown): Promise<PromptAssembly> {
     // Re-snapshot catalog fresh on each assemble to catch all registered tools
     this.snapshotCatalog()
-    console.log(`[dsh-tiny-tool] assemble called, catalog size: ${this.catalog.size}, assembly tools: ${assembly.tools?.length ?? 0}`)
     if (this.catalog.size === 0) return assembly
     // Transform tools in-place: use assembly.tools as source of truth,
     // falling back to catalog for any tools not in the assembly.
