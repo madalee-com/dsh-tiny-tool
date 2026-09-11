@@ -5,6 +5,6 @@
 # two bridge tools (tool_search / tool_describe).
 
 - insert:
-    - id: tiny-tool
+    - id: dsh-tiny-tool
       name: 'dsh-tiny-tool'
       config: {}
