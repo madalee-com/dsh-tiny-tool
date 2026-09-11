@@ -12,18 +12,6 @@ Hide all tool/MCP descriptions from the DSH system prompt. Exposes them on deman
 
 The model can still call tools through the normal mechanism — it just won't see parameter details in the system prompt. Use `tool_describe` to reveal a schema when needed, then call the tool directly.
 
-## Configuration
-
-Pass `exemptTools` to keep specific tools fully visible:
-
-```ts
-apply(ctx, {
-  exemptTools: ['bash', 'read', 'write']
-})
-```
-
-Tools in this list will keep their full descriptions and parameters in the system prompt.
-
 ## Installation
 
 ### Via dsh plugin install
@@ -49,11 +37,13 @@ Add to your DSH profile's `package.json`:
 }
 ```
 
-Or add the cordis patch directly to your `cordis.patch.yml`:
+## Configuration
+
+Add the cordis patch directly to your `cordis.patch.yml`:
 
 ```yaml
 - insert:
-    - id: tiny-tool
+    - id: dsh-tiny-tool
       name: 'dsh-tiny-tool'
       config:
         exemptTools:
@@ -61,6 +51,8 @@ Or add the cordis patch directly to your `cordis.patch.yml`:
           - read
           - write
 ```
+
+Tools in `exemptTools` will keep their full descriptions and parameters in the system prompt.
 
 ## Building
 
