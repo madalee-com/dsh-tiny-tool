@@ -161,6 +161,9 @@ export class TinyToolEngine {
     // Re-snapshot catalog fresh on each assemble to catch all registered tools
     this.snapshotCatalog()
     if (this.catalog.size === 0) return assembly
+    // Skip transformation for subagent contexts — they need full tool schemas
+    const agent = this.ctx.agents?.currentInitiator()
+    if (agent?.session.header.origin === 'subagent') return assembly
     // Transform tools in-place: use assembly.tools as source of truth,
     // falling back to catalog for any tools not in the assembly.
     // This prevents losing tools if the catalog is incomplete.
