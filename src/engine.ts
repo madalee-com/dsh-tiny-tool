@@ -84,6 +84,13 @@ function minifySchema(schema: unknown): unknown {
 
   return schema
 }
+/**
+ * Extract the first sentence from a description (up to the first period).
+ */
+function extractFirstSentence(description: string): string {
+  const match = description.match(/^([^.]*[^.\s])/)
+  return match?.[1] ?? ''
+}
 
 /**
  * The dsh-tiny-tool engine: snapshots the tool catalog and transforms every
@@ -211,7 +218,7 @@ export class TinyToolEngine {
       }
       return {
         name: entry.name,
-        description: '',
+        description: extractFirstSentence(entry.description) + ' Must use tool_describe before first usage!',
         parameters: minifySchema(entry.parameters) as ToolSchema['parameters'],
       }
     })
@@ -220,7 +227,7 @@ export class TinyToolEngine {
       if (!tools.some(t => t.name === entry.name)) {
         stubbedTools.push({
           name: entry.name,
-          description: this.isExempt(entry.name) ? entry.description : '',
+          description: this.isExempt(entry.name) ? entry.description : extractFirstSentence(entry.description) + ' Must use tool_describe before first usage!',
           parameters: minifySchema(entry.parameters) as ToolSchema['parameters'],
         })
       }
