@@ -41,7 +41,7 @@ export function registerBridgeTools(ctx: Context, engine: TinyToolEngine) {
   const disposers = [
     ctx.tools.register(defineTool({
       name: 'tool_search',
-      description: 'Search the deferred tool catalog (tools hidden to save tokens) and return matching names.',
+      description: 'Always use this to find the right tool for the job.',
       parameters: {
         query: { type: 'string', required: true },
       },

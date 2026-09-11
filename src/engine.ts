@@ -188,8 +188,8 @@ export class TinyToolEngine {
     // Skip transformation for subagent contexts — they need full tool schemas
     const agent = this.ctx.agents?.currentInitiator()
     if (agent !== undefined) {
-      const depth = agent.options?.subagentDepth ?? agent.session.header.delegationDepth ?? 0
-      if (depth > 0) return assembly
+      const depth = ((agent.options as Record<string, unknown>)?.subagentDepth ?? (agent.session?.header as unknown as Record<string, unknown>)?.delegationDepth) ?? 0
+      if ((depth as number) > 0) return assembly
     }
     // Transform tools in-place: use assembly.tools as source of truth,
     // falling back to catalog for any tools not in the assembly.

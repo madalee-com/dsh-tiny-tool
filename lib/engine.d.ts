@@ -17,6 +17,8 @@ export interface CatalogEntry {
 export interface TinyToolConfig {
     /** Tool names to keep fully visible (do not hide descriptions). */
     exemptTools?: string[];
+    /** Tool name prefixes to keep fully visible (e.g. ['mnemon_']). */
+    exemptPrefixes?: string[];
 }
 /**
  * The dsh-tiny-tool engine: snapshots the tool catalog and transforms every
@@ -27,7 +29,12 @@ export declare class TinyToolEngine {
     private readonly ctx;
     private readonly catalog;
     private readonly exemptTools;
+    private readonly exemptPrefixes;
     constructor(ctx: Context, config?: TinyToolConfig);
+    /**
+     * Check if a tool name should be exempt from minification.
+     */
+    private isExempt;
     /**
      * Capture the current full tool catalog from the registry.
      * Runs on each assemble() call to ensure tools are registered before capture.
