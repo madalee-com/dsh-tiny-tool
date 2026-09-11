@@ -186,7 +186,12 @@ export class TinyToolEngine {
     this.snapshotCatalog()
     if (this.catalog.size === 0) return assembly
     // Skip transformation for subagent contexts — they need full tool schemas
-    const agent = this.ctx.agents?.currentInitiator()
+    let agent: any
+    try {
+      agent = this.ctx.agents?.currentInitiator()
+    } catch {
+      agent = undefined
+    }
     if (agent !== undefined) {
       const depth = ((agent.options as Record<string, unknown>)?.subagentDepth ?? (agent.session?.header as unknown as Record<string, unknown>)?.delegationDepth) ?? 0
       if ((depth as number) > 0) return assembly
