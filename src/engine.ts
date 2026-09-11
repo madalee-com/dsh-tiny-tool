@@ -4,6 +4,7 @@
  */
 
 import { Context } from '@deepseek-ai/cordis'
+import { BRIDGE_NAMES } from './bridge.js'
 import type { ToolSchema } from '@deepseek-ai/dsh-llm'
 import type { PromptAssembly, AssembleContext } from '@deepseek-ai/dsh-system-prompt'
 
@@ -97,6 +98,10 @@ export class TinyToolEngine {
 
   constructor(ctx: Context, config: TinyToolConfig = {}) {
     this.ctx = ctx
+    // Always exempt bridge tools — they need descriptions to function
+    for (const name of BRIDGE_NAMES) {
+      this.exemptTools.add(name)
+    }
     if (config.exemptTools) {
       for (const name of config.exemptTools) {
         this.exemptTools.add(name)
