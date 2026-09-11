@@ -7,4 +7,6 @@
 - insert:
     - id: dsh-tiny-tool
       name: 'dsh-tiny-tool'
-      config: {}
+      config:
+        exemptPrefixes:
+          - mnemon_
