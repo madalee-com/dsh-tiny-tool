@@ -21,7 +21,7 @@ function errorMessage(error) {
 * @param engine - engine-backed search/describe services.
 * @returns the combined disposer for all registrations.
 */
-function registerBridgeTools(ctx, engine) {
+function // DISABLED: registerBridgeTools(ctx, engine) {
 	const deps = {
 		search: (query) => engine.search(query),
 		describe: (name) => engine.describe(name)
@@ -270,7 +270,7 @@ const TinyToolConfigSchema = z.object({
 */
 function apply(ctx, config = {}) {
 	const engine = new TinyToolEngine(ctx, config);
-	registerBridgeTools(ctx, engine);
+	// DISABLED: registerBridgeTools(ctx, engine);
 	ctx.inject(["settings"], (settingsCtx) => {
 		settingsCtx.settings?.register?.(TINY_TOOL_SETTINGS_NS, TinyToolConfigSchema, { base: {} });
 	});
