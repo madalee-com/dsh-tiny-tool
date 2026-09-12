@@ -9,11 +9,22 @@
     ".": {
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/client.d.ts",
+      "default": "./lib/client.js"
     }
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
     }
   },
   "files": [
@@ -23,14 +34,13 @@
   ],
   "license": "MIT",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && tsdown",
+    "build": "tsc -p tsconfig.build.json && tsdown --no-clean && mv lib/client.mjs lib/client.js && mv lib/client.mjs.map lib/client.js.map && echo build-ok",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
     "@deepseek-ai/dsh-system-prompt": "*",
     "@deepseek-ai/dsh-tools": "*",
-
     "@deepseek-ai/schemastery": "*"
   },
   "allowScripts": {
@@ -38,13 +48,15 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-slots": "0.1.0-rc.6",
     "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.1",
     "@deepseek-ai/dsh-tools": "0.1.5-rc.1",
-
     "@deepseek-ai/schemastery": "^3.18.2",
     "@types/node": "^22.20.2",
+    "@types/react": "^18.3.31",
+    "react": "^18.3.1",
     "tsdown": "^0.23.0",
     "typescript": "^5.9.3"
-  },
-  "dependencies": {}
+  }
 }
