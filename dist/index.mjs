@@ -144,7 +144,6 @@ var TinyToolEngine = class {
 		for (const name of BRIDGE_NAMES) this.exemptTools.add(name);
 		if (config.exemptTools) for (const name of config.exemptTools) this.exemptTools.add(name);
 		if (config.exemptPrefixes) for (const prefix of config.exemptPrefixes) this.exemptPrefixes.add(prefix);
-		ctx.on("system-prompt/assemble", this.assemble.bind(this));
 	}
 	/**
 	* Check if a tool name should be exempt from minification.
@@ -272,6 +271,9 @@ const TinyToolConfigSchema = z.object({
 function apply(ctx, config = {}) {
 	const engine = new TinyToolEngine(ctx, config);
 	registerBridgeTools(ctx, engine);
+	ctx.inject(["settings"], (settingsCtx) => {
+		settingsCtx.settings?.register?.(TINY_TOOL_SETTINGS_NS, TinyToolConfigSchema, { base: {} });
+	});
 	return engine;
 }
 //#endregion
