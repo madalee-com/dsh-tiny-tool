@@ -1,3 +1,10 @@
-# dsh-tiny-tool bundle patch: DISABLED for troubleshooting.
-# No plugins inserted.
-[]
+# dsh-tiny-tool bundle patch: inserts the plugin row over the profile root.
+#
+# The plugin hides all tool/MCP descriptions from the system prompt, replacing
+# them with minimal stubs. Full schemas are kept in-memory and exposed through
+# two bridge tools (tool_search / tool_describe).
+
+- insert:
+    - id: dsh-tiny-tool
+      name: 'dsh-tiny-tool'
+      config: {}
