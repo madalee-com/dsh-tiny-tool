@@ -5,11 +5,12 @@ export default defineConfig({
     client: 'src/client/index.tsx',
   },
   outDir: 'lib',
-  format: ['esm'],
+  format: ['cjs'],
   target: 'es2022',
   treeshake: true,
   sourcemap: true,
   dts: false,
-  // Force .js extension
-  outExtension: () => '.js',
+  // Prevent ESM wrapper at the end
+  banner: { js: '' },
+  footer: { js: '' },
 })
