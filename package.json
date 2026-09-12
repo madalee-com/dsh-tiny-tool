@@ -33,9 +33,10 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
-    "@deepseek-ai/dsh-system-prompt": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-tools": "^0.1.2-rc.1",
-    "@deepseek-ai/schemastery": "^3.18.0"
+    "@deepseek-ai/dsh-system-prompt": "*",
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/dsh-llm": "*",
+    "@deepseek-ai/schemastery": "*"
   },
   "allowScripts": {
     "typescript": true
@@ -45,12 +46,13 @@
     "@deepseek-ai/dsh-client-ui-settings": "0.1.5-rc.1",
     "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.1",
     "@deepseek-ai/dsh-tools": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-llm": "0.1.5-rc.1",
     "@deepseek-ai/schemastery": "^3.18.2",
     "@types/node": "^22.20.2",
     "tsdown": "^0.23.0",
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-llm": "0.0.1-rc.1"
+    "@deepseek-ai/dsh-llm": "*"
   }
 }
