@@ -6,7 +6,7 @@ import { Context } from '@deepseek-ai/cordis';
 export type ToolSchema = {
     name: string;
     description: string;
-    parameters: unknown;
+    parameters: Record<string, unknown>;
 };
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt';
 /** One captured catalog entry — the full schema kept for on-demand describe. */

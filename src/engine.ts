@@ -5,7 +5,7 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import { BRIDGE_NAMES } from './bridge.js'
-export type ToolSchema = { name: string; description: string; parameters: unknown }
+export type ToolSchema = { name: string; description: string; parameters: Record<string, unknown> }
 import type { PromptAssembly, AssembleContext } from '@deepseek-ai/dsh-system-prompt'
 
 /** One captured catalog entry — the full schema kept for on-demand describe. */
