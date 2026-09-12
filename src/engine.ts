@@ -128,8 +128,8 @@ export class TinyToolEngine {
         this.exemptPrefixes.add(prefix)
       }
     }
-    // DISABLED: Register the assemble hook explicitly
-    // ctx.on('system-prompt/assemble', this.assemble.bind(this))
+    // Register the assemble hook explicitly
+    ctx.on('system-prompt/assemble', this.assemble.bind(this))
   }
 
   /**

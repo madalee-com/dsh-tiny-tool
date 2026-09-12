@@ -38,16 +38,16 @@ export const TinyToolConfigSchema = z.object({
  */
 export function apply(ctx: Context, config: TinyToolConfig = {}) {
   const engine = new TinyToolEngine(ctx, config)
-  // DISABLED: registerBridgeTools(ctx, engine)
+  registerBridgeTools(ctx, engine)
 
-  // DISABLED: Register settings namespace for UI configuration
-  // ctx.inject(['settings'], (settingsCtx: any) => {
-  //   settingsCtx.settings?.register?.(
-  //     TINY_TOOL_SETTINGS_NS,
-  //     TinyToolConfigSchema,
-  //     { base: {} }
-  //   )
-  // })
+  // Register settings namespace for UI configuration
+  ctx.inject(['settings'], (settingsCtx: any) => {
+    settingsCtx.settings?.register?.(
+      TINY_TOOL_SETTINGS_NS,
+      TinyToolConfigSchema,
+      { base: {} }
+    )
+  })
 
   return engine
 }
