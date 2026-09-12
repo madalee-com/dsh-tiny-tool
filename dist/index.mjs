@@ -221,7 +221,7 @@ var TinyToolEngine = class {
 				const desc = tool.description ?? "";
 				return {
 					name: tool.name,
-					description: extractFirstSentence(desc) + " Must use tool_describe before first usage!",
+					description: extractFirstSentence(desc),
 					parameters: minifySchema(tool.parameters)
 				};
 			}
@@ -232,14 +232,18 @@ var TinyToolEngine = class {
 			};
 			return {
 				name: entry.name,
-				description: extractFirstSentence(entry.description) + " Must use tool_describe before first usage!",
+				description: extractFirstSentence(entry.description),
 				parameters: minifySchema(entry.parameters)
 			};
 		});
 		for (const entry of this.catalog.values()) if (!tools.some((t) => t.name === entry.name)) stubbedTools.push({
 			name: entry.name,
-			description: this.isExempt(entry.name) ? entry.description : extractFirstSentence(entry.description) + " Must use tool_describe before first usage!",
+			description: this.isExempt(entry.name) ? entry.description : extractFirstSentence(entry.description),
 			parameters: minifySchema(entry.parameters)
+		});
+		assembly.sections.push({
+			name: "tiny-tool/instruction",
+			text: "use tool_describe before using other tools, this is NON-NEGOTIABLE"
 		});
 		return {
 			...assembly,
