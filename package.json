@@ -9,10 +9,6 @@
     ".": {
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
-    },
-    "./client": {
-      "types": "./lib/types/client/index.d.ts",
-      "default": "./lib/client.js"
     }
   },
   "dsh": {
@@ -28,7 +24,6 @@
   "license": "MIT",
   "scripts": {
     "build": "tsc -p tsconfig.build.json && tsdown",
-    "build:client": "tsdown",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
@@ -43,7 +38,6 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-client-ui-settings": "0.1.5-rc.1",
     "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.1",
     "@deepseek-ai/dsh-tools": "0.1.5-rc.1",
     "@deepseek-ai/dsh-llm": "0.1.5-rc.1",

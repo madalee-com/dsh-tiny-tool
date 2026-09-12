@@ -12,20 +12,13 @@
  * @module dsh-tiny-tool
  */
 import { Context } from '@deepseek-ai/cordis';
-import z from '@deepseek-ai/schemastery';
 import { TinyToolEngine, type TinyToolConfig } from './engine.js';
 export declare const name = "dsh-tiny-tool";
 export declare const inject: string[];
 /** Settings namespace for plugin configuration. */
 export declare const TINY_TOOL_SETTINGS_NS = "tiny-tool-config";
 /** Schema for the tiny-tool configuration. */
-export declare const TinyToolConfigSchema: z<Schemastery.ObjectS<{
-    exemptTools: z<string[], string[]>;
-    exemptPrefixes: z<string[], string[]>;
-}>, Schemastery.ObjectT<{
-    exemptTools: z<string[], string[]>;
-    exemptPrefixes: z<string[], string[]>;
-}>>;
+export declare const TinyToolConfigSchema: any;
 /**
  * Apply the plugin: snapshot the full catalog, register bridge tools, hook
  * the system-prompt/assemble waterfall, and register settings for UI config.
