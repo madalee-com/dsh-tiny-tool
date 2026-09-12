@@ -272,9 +272,6 @@ const TinyToolConfigSchema = z.object({
 function apply(ctx, config = {}) {
 	const engine = new TinyToolEngine(ctx, config);
 	registerBridgeTools(ctx, engine);
-	ctx.inject(["settings"], (settingsCtx) => {
-		settingsCtx.settings?.register?.(TINY_TOOL_SETTINGS_NS, TinyToolConfigSchema, { base: {} });
-	});
 	return engine;
 }
 //#endregion
