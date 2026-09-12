@@ -224,7 +224,7 @@ export class TinyToolEngine {
         return {
           name: tool.name,
           description: extractFirstSentence(desc) + ' Must use tool_describe before first usage!',
-          parameters: tool.parameters,
+          parameters: minifySchema(tool.parameters) as ToolSchema['parameters'],
         }
       }
       if (this.isExempt(entry.name)) {
