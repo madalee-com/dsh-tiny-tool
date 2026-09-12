@@ -1,1 +1,1 @@
-{"version":3,"file":"bridge.d.ts","sourceRoot":"","sources":["../src/bridge.ts"],"names":[],"mappings":"AAAA;;;GAGG;AAEH,OAAO,EAAE,OAAO,EAAE,MAAM,qBAAqB,CAAA;AAE7C,OAAO,KAAK,EAAE,cAAc,EAAE,MAAM,aAAa,CAAA;AAEjD,6BAA6B;AAC7B,eAAO,MAAM,YAAY,2CAA4C,CAAA;AAgBrE;;;;;;;GAOG;AACH,wBAAgB,mBAAmB,CAAC,GAAG,EAAE,OAAO,EAAE,MAAM,EAAE,cAAc,cA0CvE"}
+{"version":3,"file":"bridge.d.ts","sourceRoot":"","sources":["../src/bridge.ts"],"names":[],"mappings":"AAAA,eAAO,MAAM,YAAY,aAAc,CAAA;AAEvC,wBAAgB,mBAAmB,CAAC,IAAI,EAAE,GAAG,EAAE,OAAO,EAAE,GAAG,cAE1D"}
