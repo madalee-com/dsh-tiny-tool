@@ -67,6 +67,5 @@ export declare class TinyToolEngine {
      * @param _scope - the calling agent scope (unused).
      * @returns the transformed assembly.
      */
-    assemble(assembly: PromptAssembly, _scope?: unknown): Promise<PromptAssembly>;
+    assemble(assembly: PromptAssembly, _scope?: unknown, next?: (...args: unknown[]) => Promise<PromptAssembly>): Promise<PromptAssembly>;
 }
-//# sourceMappingURL=engine.d.ts.map
