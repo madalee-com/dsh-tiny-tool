@@ -74,3 +74,4 @@ export declare class TinyToolEngine {
      */
     preStep(payload: any, next: (...args: unknown[]) => Promise<any>): Promise<any>;
 }
+//# sourceMappingURL=engine.d.ts.map

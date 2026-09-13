@@ -34,3 +34,4 @@ export declare const TinyToolConfigSchema: z<Schemastery.ObjectS<{
  * @returns the engine instance.
  */
 export declare function apply(ctx: Context, config?: TinyToolConfig): TinyToolEngine;
+//# sourceMappingURL=index.d.ts.map

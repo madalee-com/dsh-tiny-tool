@@ -217,7 +217,18 @@ export class TinyToolEngine {
     // Transform tools in-place: use assembly.tools as source of truth,
     // falling back to catalog for any tools not in the assembly.
     // This prevents losing tools if the catalog is incomplete.
+    // Also populate catalog from assembly.tools to capture tools not registered
+    // through ctx.tools.register() (e.g., remote service methods like read/write).
     const tools = assembly.tools ?? []
+    for (const tool of tools) {
+      if (!this.catalog.has(tool.name)) {
+        this.catalog.set(tool.name, {
+          name: tool.name,
+          description: (tool.description ?? '') as string,
+          parameters: (tool.parameters ?? {}) as ToolSchema['parameters'],
+        })
+      }
+    }
     const stubbedTools: ToolSchema[] = tools.map(tool => {
       const entry = this.catalog.get(tool.name)
       if (entry === undefined) {

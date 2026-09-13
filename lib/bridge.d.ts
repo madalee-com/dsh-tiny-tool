@@ -15,3 +15,4 @@ export declare const BRIDGE_NAMES: readonly ["tool_search", "tool_describe"];
  * @returns the combined disposer for all registrations.
  */
 export declare function registerBridgeTools(ctx: Context, engine: TinyToolEngine): () => void;
+//# sourceMappingURL=bridge.d.ts.map
