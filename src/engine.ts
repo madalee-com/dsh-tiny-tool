@@ -130,6 +130,8 @@ export class TinyToolEngine {
     }
     // Register the assemble hook explicitly
     ctx.on('system-prompt/assemble', this.assemble.bind(this))
+    // Register the pre-step hook to inject tool_describe instruction as context
+    ctx.on('agent/pre-step', this.preStep.bind(this), { prepend: true })
   }
 
   /**
@@ -246,13 +248,41 @@ export class TinyToolEngine {
         })
       }
     }
-    // Inject the non-negotiable tool_describe command into the system prompt
-    assembly.sections.push({
-      name: 'tiny-tool/instruction',
-      text: 'use tool_describe before using other tools, this is NON-NEGOTIABLE',
-    })
     // Call next() to allow downstream listeners (e.g., mnemon) to run
     const result = next ? await next(assembly, _scope) : assembly
     return { ...result, tools: stubbedTools }
+  }
+
+  /**
+   * Inject the tool_describe instruction as a context message after the system prompt
+   * and after every compaction, similar to how mnemon injects its guidance.
+   */
+  async preStep(payload: any, next: (...args: unknown[]) => Promise<any>): Promise<any> {
+    const decision = await next()
+    // Only inject on step 1 (first turn of a session) and after compaction
+    if (payload?.step !== 1) return decision
+    // Check if we've already injected this instruction
+    const alreadyInjected = decision?.messages?.some((msg: any) => {
+      const source = msg?.source
+      return source?.kind === 'plugin' && source?.plugin === 'dsh-tiny-tool'
+    })
+    if (alreadyInjected) return decision
+    if (!decision?.messages?.length) return decision
+    // Inject the instruction as a user message with plugin source
+    const instruction = 'use tool_describe before using other tools, this is NON-NEGOTIABLE'
+    const pluginMessage = {
+      id: crypto.randomUUID(),
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text: instruction }],
+      source: {
+        kind: 'plugin' as const,
+        plugin: 'dsh-tiny-tool',
+        form: 'instructions' as const,
+      },
+    }
+    return {
+      kind: 'enter' as const,
+      messages: [...decision.messages, pluginMessage],
+    }
   }
 }

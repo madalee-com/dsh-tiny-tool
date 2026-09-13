@@ -68,4 +68,9 @@ export declare class TinyToolEngine {
      * @returns the transformed assembly.
      */
     assemble(assembly: PromptAssembly, _scope?: unknown, next?: (...args: unknown[]) => Promise<PromptAssembly>): Promise<PromptAssembly>;
+    /**
+     * Inject the tool_describe instruction as a context message after the system prompt
+     * and after every compaction, similar to how mnemon injects its guidance.
+     */
+    preStep(payload: any, next: (...args: unknown[]) => Promise<any>): Promise<any>;
 }
