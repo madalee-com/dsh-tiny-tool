@@ -197,7 +197,7 @@ export class TinyToolEngine {
    * @param _scope - the calling agent scope (unused).
    * @returns the transformed assembly.
    */
-  async assemble(assembly: PromptAssembly, _scope?: unknown): Promise<PromptAssembly> {
+  async assemble(assembly: PromptAssembly, _scope?: unknown, next?: (...args: unknown[]) => Promise<PromptAssembly>): Promise<PromptAssembly> {
     // Re-snapshot catalog fresh on each assemble to catch all registered tools
     this.snapshotCatalog()
     if (this.catalog.size === 0) return assembly
@@ -251,6 +251,8 @@ export class TinyToolEngine {
       name: 'tiny-tool/instruction',
       text: 'use tool_describe before using other tools, this is NON-NEGOTIABLE',
     })
-    return { ...assembly, tools: stubbedTools }
+    // Call next() to allow downstream listeners (e.g., mnemon) to run
+    const result = next ? await next(assembly, _scope) : assembly
+    return { ...result, tools: stubbedTools }
   }
 }
