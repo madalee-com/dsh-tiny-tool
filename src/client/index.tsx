@@ -341,7 +341,11 @@
       }
     }
 
-    module.exports = { apply, inject: ['slots', 'locale', 'settingsScope'] }
+    // NOTE (0.2.0): settingsScope was removed from the client runtime. It is
+    // read opportunistically via getService() below (and falls back to the host
+    // REST endpoint when absent), so it must NOT be a required inject target —
+    // listing it hangs activation "pending". Slots + locale are core-provided.
+    module.exports = { apply, inject: ['slots', 'locale'] }
     return module.exports
   },
 })
