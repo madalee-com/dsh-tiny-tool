@@ -172,37 +172,36 @@
       const [saving, setSaving] = React.useState(false)
       const [err, setErr] = React.useState('')
 
-      const scope = React.useMemo(() => {
-        const svc = getService(ctx, 'settingsScope')
-        return svc && typeof svc.bind === 'function' ? svc.bind({ namespace: NS }) : undefined
-      }, [ctx])
+      // Native settings read: configForms.get(ns) → reactive { status, value, writable }
+      const forms = getService(ctx, 'configForms')
+      const scope = React.useMemo(
+        () => (forms && typeof forms.get === 'function' ? forms.get(NS) : undefined),
+        [forms],
+      )
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const snapshot = React.useSyncExternalStore(
-        React.useMemo(() => (cb: any) => (scope ? scope.subscribe(cb) : () => {}), [scope]),
-        React.useCallback(() => (scope ? scope.getSnapshot() : { status: 'ready' as const }), [scope]),
+        React.useMemo(() => ((cb: any) => (scope ? scope.subscribe(cb) : () => {})), [scope]),
+        React.useCallback(() => (scope ? scope.getSnapshot() : { status: 'unavailable' as const }), [scope]),
         React.useCallback(() => ({ status: 'loading' as const }), []),
       )
 
-      const status = snapshot?.status || 'ready'
+      const status = snapshot?.status || 'unavailable'
       const writable = snapshot?.writable !== undefined ? snapshot.writable : true
 
-      // Load initial config from REST endpoint if available
+      // Sync draft/saved from the native scope value (no REST fetch needed)
       React.useEffect(() => {
-        if (status === 'unavailable') return
-        let alive = true
-        fetch('/dsh-tiny-tool/config', { cache: 'no-store' })
-          .then((res) => res.json())
-          .then((data: any) => {
-            if (!alive) return
-            const exemptTools = Array.isArray(data.exemptTools) ? data.exemptTools : []
-            const exemptPrefixes = Array.isArray(data.exemptPrefixes) ? data.exemptPrefixes : []
-            setSaved({ exemptTools, exemptPrefixes })
-            setDraft({ exemptTools, exemptPrefixes })
-          })
-          .catch((e: unknown) => { if (alive) setErr(String(e instanceof Error ? e.message : e)) })
-        return () => { alive = false }
-      }, [status])
+        if (status === 'unavailable' || !snapshot?.value) return
+        const value = snapshot.value as Record<string, unknown> | undefined
+        setDraft({
+          exemptTools: Array.isArray(value?.exemptTools) ? value.exemptTools : [],
+          exemptPrefixes: Array.isArray(value?.exemptPrefixes) ? value.exemptPrefixes : [],
+        })
+        setSaved({
+          exemptTools: Array.isArray(value?.exemptTools) ? value.exemptTools : [],
+          exemptPrefixes: Array.isArray(value?.exemptPrefixes) ? value.exemptPrefixes : [],
+        })
+      }, [status, snapshot])
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const setField = (key: keyof ConfigState, value: string[]) => setDraft((d: any) => d ? { ...d, [key]: value } : { exemptTools: value, exemptPrefixes: [] })
@@ -219,21 +218,17 @@
         setSaving(true)
         try {
           const payload = { exemptTools: draft.exemptTools, exemptPrefixes: draft.exemptPrefixes }
-          // Try settingsScope first
-          if (scope && typeof scope.set === 'function') {
-            const broken: string[] = []
-            try { await scope.set('exemptTools', payload.exemptTools) } catch (e: unknown) { broken.push('exemptTools: ' + (e instanceof Error ? e.message : String(e))) }
-            try { await scope.set('exemptPrefixes', payload.exemptPrefixes) } catch (e: unknown) { broken.push('exemptPrefixes: ' + (e instanceof Error ? e.message : String(e))) }
-            if (broken.length) throw new Error(broken.join('; '))
+          // Native write via the settings service (direct update/replace)
+          const sctx = getService(ctx, 'settings')
+          const svc = sctx ? sctx.settings : undefined
+          const revision = snapshot?.revision ?? undefined
+          if (typeof svc?.update === 'function') {
+            await svc.update(NS, structuredClone(payload), revision)
+          } else if (typeof svc?.replace === 'function') {
+            await svc.replace(NS, structuredClone(payload), revision)
+          } else {
+            throw new Error('native settings service unavailable')
           }
-          // Fallback to REST
-          const res = await fetch('/dsh-tiny-tool/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          })
-          const data = await res.json().catch(() => ({}))
-          if (!res.ok) throw new Error((data && (data as Record<string, unknown>).error && (data.error as Record<string, unknown>)?.message) || ('HTTP ' + res.status))
           setSaved({ exemptTools: payload.exemptTools, exemptPrefixes: payload.exemptPrefixes })
         } catch (e: unknown) {
           setErr(e instanceof Error ? e.message : String(e))
@@ -361,10 +356,10 @@
       }
     }
 
-    // NOTE (0.2.0): settingsScope was removed from the client runtime. It is
-    // read opportunistically via getService() below (and falls back to the host
-    // REST endpoint when absent), so it must NOT be a required inject target —
-    // listing it hangs activation "pending". Slots + locale are core-provided.
+    // NOTE (0.2.0): legacy scoped settings + REST removed.
+    // The card now reads via the native configForms.get(ns) snapshot and writes
+    // directly to the native settings service (update/replace). Neither a scoped
+    // `settingsScope` nor `/dsh-tiny-tool/config` fetch remains.
     // NOTE (0.2.1): return the plugin object directly instead of assigning to
     // `module.exports`. The client runtime loads this entry as an ES module
     // (`"type": "module"`), where the CommonJS global `module` is undefined and
@@ -372,6 +367,6 @@
     // invokes factory() and reads its return value, so a direct return is
     // equivalent to the proven gitea/pilot/context bundles (which instead
     // declare a local `var module = { exports: {} }` shim inside the factory).
-    return { apply, inject: ['slots', 'locale'] }
+    return { apply, inject: ['slots', 'locale', 'configForms'] }
   },
 })
