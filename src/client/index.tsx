@@ -338,6 +338,26 @@
         } catch (err: unknown) {
           console.error('[dsh-tiny-tool] settings registration error:', err)
         }
+
+        // Mount on the DSH Plugins page. The new web GUI renders plugin
+        // setting cards in the `plugins.item` slot; the harness Settings UI
+        // does not render `settings.plugin.item`, so without this the card
+        // was effectively invisible there. Mirrors dsh-gitea, which keeps
+        // both seats.
+        try {
+          slotsSvc.inject('plugins.item', () => slotsSvc.register(
+            {
+              name: 'plugins.item',
+              id: NS,
+              order: 60,
+              label: () => 'dsh-tiny-tool',
+              inject: () => ({ ctx }),
+            },
+            (props: Record<string, unknown>) => React.createElement(TinyToolPluginCard, Object.assign({}, props, { ctx })),
+          ))
+        } catch (err: unknown) {
+          console.error('[dsh-tiny-tool] plugins.item registration error:', err)
+        }
       }
     }
 
