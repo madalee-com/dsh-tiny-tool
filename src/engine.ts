@@ -275,19 +275,30 @@ export class TinyToolEngine {
     // Check if we've already injected this instruction
     const alreadyInjected = decision?.messages?.some((msg: any) => {
       const source = msg?.source
-      return source?.kind === 'plugin' && source?.plugin === 'dsh-tiny-tool'
+      // Match the producer-owned v4 source kind; also accept the retired
+      // `kind:'plugin'` wrapper for any instruction injected under an older
+      // dsh-tiny-tool build so compaction does not re-inject a duplicate.
+      return (
+        source?.kind === 'plugin:dsh-tiny-tool' ||
+        (source?.kind === 'plugin' && source?.plugin === 'dsh-tiny-tool')
+      )
     })
     if (alreadyInjected) return decision
     if (!decision?.messages?.length) return decision
-    // Inject the instruction as a user message with plugin source
+    // Inject the instruction as a user message with a producer-owned v4 source.
+    // dsh v4's session format (dsh-session-format-v3-to-v4) rejects the retired
+    // `source.kind === 'plugin'` wrapper on encode, surfacing as "This turn
+    // failed: format v4 message requires a producer-owned source kind". The
+    // canonical producer-owned kind for this plugin is `plugin:<name>` per that
+    // package's producerKind mapping, which is exactly the shape it rewrites to
+    // at decode time — emit it directly instead of the retired v3 wrapper.
     const instruction = 'use tool_describe before using other tools and after every tool failure, this is NON-NEGOTIABLE'
     const pluginMessage = {
       id: crypto.randomUUID(),
       role: 'user' as const,
       content: [{ type: 'text' as const, text: instruction }],
       source: {
-        kind: 'plugin' as const,
-        plugin: 'dsh-tiny-tool',
+        kind: 'plugin:dsh-tiny-tool' as const,
         form: 'instructions' as const,
       },
     }
