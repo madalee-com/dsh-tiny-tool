@@ -345,7 +345,13 @@
     // read opportunistically via getService() below (and falls back to the host
     // REST endpoint when absent), so it must NOT be a required inject target —
     // listing it hangs activation "pending". Slots + locale are core-provided.
-    module.exports = { apply, inject: ['slots', 'locale'] }
-    return module.exports
+    // NOTE (0.2.1): return the plugin object directly instead of assigning to
+    // `module.exports`. The client runtime loads this entry as an ES module
+    // (`"type": "module"`), where the CommonJS global `module` is undefined and
+    // surfaced as "import failed: module is not defined". dsh's ModuleLoader
+    // invokes factory() and reads its return value, so a direct return is
+    // equivalent to the proven gitea/pilot/context bundles (which instead
+    // declare a local `var module = { exports: {} }` shim inside the factory).
+    return { apply, inject: ['slots', 'locale'] }
   },
 })
