@@ -23,6 +23,8 @@ export interface TinyToolConfig {
   exemptTools?: string[]
   /** Tool name prefixes to keep fully visible (e.g. ['mnemon_']). */
   exemptPrefixes?: string[]
+  /** When true, non-exempt tools are sent with empty parameters instead of a trimmed schema. On by default. */
+  emptyParameters?: boolean
 }
 
 /**
@@ -111,6 +113,7 @@ export class TinyToolEngine {
   private readonly catalog = new Map<string, CatalogEntry>()
   private readonly exemptTools = new Set<string>()
   private readonly exemptPrefixes = new Set<string>()
+  private readonly emptyParameters: boolean
 
   constructor(ctx: Context, config: TinyToolConfig = {}) {
     this.ctx = ctx
@@ -128,6 +131,8 @@ export class TinyToolEngine {
         this.exemptPrefixes.add(prefix)
       }
     }
+    // On by default: empty tool parameters instead of trimming, unless explicitly disabled.
+    this.emptyParameters = config.emptyParameters !== false
     // Register the assemble hook explicitly
     ctx.on('system-prompt/assemble', this.assemble.bind(this))
     // Register the pre-step hook to inject tool_describe instruction as context
@@ -143,6 +148,14 @@ export class TinyToolEngine {
       if (name.startsWith(prefix)) return true
     }
     return false
+  }
+
+  /**
+   * Produce the system-prompt parameter schema for a tool entry. When enabled,
+   * non-exempt tools receive an empty JSON Schema (`{}`) rather than a trimmed one.
+   */
+  private transformParameters(parameters: unknown): unknown {
+    return this.emptyParameters ? {} : minifySchema(parameters)
   }
 
   /**
@@ -237,7 +250,7 @@ export class TinyToolEngine {
         return {
           name: tool.name,
           description: extractFirstSentence(desc),
-          parameters: minifySchema(tool.parameters) as ToolSchema['parameters'],
+          parameters: this.transformParameters(tool.parameters) as ToolSchema['parameters'],
         }
       }
       if (this.isExempt(entry.name)) {
@@ -255,7 +268,7 @@ export class TinyToolEngine {
         stubbedTools.push({
           name: entry.name,
           description: this.isExempt(entry.name) ? entry.description : extractFirstSentence(entry.description),
-          parameters: minifySchema(entry.parameters) as ToolSchema['parameters'],
+          parameters: this.transformParameters(entry.parameters) as ToolSchema['parameters'],
         })
       }
     }

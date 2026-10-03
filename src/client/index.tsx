@@ -81,6 +81,28 @@
       )
     }
 
+    function boolField(
+      id: string,
+      label: string,
+      hint: string,
+      value: boolean,
+      onChange: (v: boolean) => void,
+    ): React.ReactElement {
+      return React.createElement('div', { className: 'dtt-field' },
+        React.createElement('div', { className: 'dtt-fieldHead' },
+          React.createElement('label', { className: 'dtt-label', htmlFor: id }, label),
+        ),
+        React.createElement('input', {
+          id,
+          className: 'dtt-switch',
+          type: 'checkbox',
+          checked: value ?? false,
+          onChange: (e: any) => onChange(e.currentTarget.checked),
+        }),
+        hint ? React.createElement('span', { className: 'dtt-hint' }, hint) : null,
+      )
+    }
+
     // ─── locale ──────────────────────────────────────────────────────────────
 
     interface LocaleDict {
@@ -91,6 +113,8 @@
       exemptToolsHint: string
       exemptPrefixes: string
       exemptPrefixesHint: string
+      emptyParameters: string
+      emptyParametersHint: string
       save: string
       saving: string
       discard: string
@@ -108,6 +132,8 @@
       exemptToolsHint: 'Exact tool names to keep fully visible (e.g. tool_describe).',
       exemptPrefixes: 'Exempt Prefixes',
       exemptPrefixesHint: 'Tool name prefixes to keep fully visible (e.g. mnemon_).',
+      emptyParameters: 'Empty Tool Parameters',
+      emptyParametersHint: 'When enabled, non-exempt tools are sent with empty parameters instead of a trimmed schema.',
       save: 'Save',
       saving: 'Saving…',
       discard: 'Discard',
@@ -124,6 +150,8 @@
       exemptToolsHint: '保持完全可见的确切工具名称（如 tool_describe）。',
       exemptPrefixes: '豁免前缀',
       exemptPrefixesHint: '保持完全可见的工具名前缀（如 mnemon_）。',
+      emptyParameters: '清空工具参数',
+      emptyParametersHint: '启用后，非豁免工具将以空参数发送，而非精简后的参数 schema。',
       save: '保存',
       saving: '保存中…',
       discard: '取消',
@@ -162,6 +190,7 @@
     interface ConfigState {
       exemptTools: string[]
       exemptPrefixes: string[]
+      emptyParameters: boolean
     }
 
     function TinyToolSettingsForm({ t, ctx }: { t: (key: string) => string; ctx: any }) {
@@ -196,18 +225,21 @@
         setDraft({
           exemptTools: Array.isArray(value?.exemptTools) ? value.exemptTools : [],
           exemptPrefixes: Array.isArray(value?.exemptPrefixes) ? value.exemptPrefixes : [],
+          emptyParameters: typeof value?.emptyParameters === 'boolean' ? value.emptyParameters : true,
         })
         setSaved({
           exemptTools: Array.isArray(value?.exemptTools) ? value.exemptTools : [],
           exemptPrefixes: Array.isArray(value?.exemptPrefixes) ? value.exemptPrefixes : [],
+          emptyParameters: typeof value?.emptyParameters === 'boolean' ? value.emptyParameters : true,
         })
       }, [status, snapshot])
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const setField = (key: keyof ConfigState, value: string[]) => setDraft((d: any) => d ? { ...d, [key]: value } : { exemptTools: value, exemptPrefixes: [] })
+      const setField = (key: keyof ConfigState, value: string[] | boolean) => setDraft((d: any) => d ? { ...d, [key]: value } : { exemptTools: value as string[], exemptPrefixes: [] })
       const dirty = !!(draft && saved && (
         JSON.stringify(draft.exemptTools) !== JSON.stringify(saved.exemptTools) ||
-        JSON.stringify(draft.exemptPrefixes) !== JSON.stringify(saved.exemptPrefixes)
+        JSON.stringify(draft.exemptPrefixes) !== JSON.stringify(saved.exemptPrefixes) ||
+        draft.emptyParameters !== saved.emptyParameters
       ))
 
       const blocked = !dirty || saving || !draft || !writable || status !== 'ready'
@@ -217,7 +249,7 @@
         setErr('')
         setSaving(true)
         try {
-          const payload = { exemptTools: draft.exemptTools, exemptPrefixes: draft.exemptPrefixes }
+          const payload = { exemptTools: draft.exemptTools, exemptPrefixes: draft.exemptPrefixes, emptyParameters: draft.emptyParameters }
           // Native write via the settings service (direct update/replace)
           const sctx = getService(ctx, 'settings')
           const svc = sctx ? sctx.settings : undefined
@@ -255,6 +287,10 @@
           draft?.exemptPrefixes ?? [],
           (tag) => setField('exemptPrefixes', [...(draft?.exemptPrefixes ?? []), tag]),
           (tag) => setField('exemptPrefixes', (draft?.exemptPrefixes ?? []).filter((p: string) => p !== tag)),
+        ),
+        boolField('dtt-empty-params', t('emptyParameters'), t('emptyParametersHint'),
+          draft?.emptyParameters ?? true,
+          (v: boolean) => setField('emptyParameters', v),
         ),
         React.createElement('div', { className: 'dtt-foot' },
           err ? React.createElement('p', { className: 'dtt-failed' }, err || t('saveFailed')) : null,

@@ -22,9 +22,11 @@ export declare const TINY_TOOL_SETTINGS_NS = "tiny-tool-config";
 export declare const TinyToolConfigSchema: z<Schemastery.ObjectS<{
     exemptTools: z<string[], string[]>;
     exemptPrefixes: z<string[], string[]>;
+    emptyParameters: z<boolean, boolean>;
 }>, Schemastery.ObjectT<{
     exemptTools: z<string[], string[]>;
     exemptPrefixes: z<string[], string[]>;
+    emptyParameters: z<boolean, boolean>;
 }>>;
 /**
  * Apply the plugin: snapshot the full catalog, register bridge tools, hook

@@ -27,6 +27,7 @@ export const TINY_TOOL_SETTINGS_NS = 'tiny-tool-config'
 export const TinyToolConfigSchema = z.object({
   exemptTools: z.array(z.string()),
   exemptPrefixes: z.array(z.string()),
+  emptyParameters: z.boolean().default(true),
 }).loose()
 
 /**

@@ -23,6 +23,8 @@ export interface TinyToolConfig {
     exemptTools?: string[];
     /** Tool name prefixes to keep fully visible (e.g. ['mnemon_']). */
     exemptPrefixes?: string[];
+    /** When true, non-exempt tools are sent with empty parameters instead of a trimmed schema. On by default. */
+    emptyParameters?: boolean;
 }
 /**
  * The dsh-tiny-tool engine: snapshots the tool catalog and transforms every
@@ -34,11 +36,17 @@ export declare class TinyToolEngine {
     private readonly catalog;
     private readonly exemptTools;
     private readonly exemptPrefixes;
+    private readonly emptyParameters;
     constructor(ctx: Context, config?: TinyToolConfig);
     /**
      * Check if a tool name should be exempt from minification.
      */
     private isExempt;
+    /**
+     * Produce the system-prompt parameter schema for a tool entry. When enabled,
+     * non-exempt tools receive an empty JSON Schema (`{}`) rather than a trimmed one.
+     */
+    private transformParameters;
     /**
      * Capture the current full tool catalog from the registry.
      * Runs on each assemble() call to ensure tools are registered before capture.
