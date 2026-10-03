@@ -5,6 +5,17 @@
 # two bridge tools (tool_search / tool_describe).
 
 - insert:
-    - id: dsh-tiny-tool
-      name: 'dsh-tiny-tool'
-      config: {}
+  - id: dsh-tiny-tool
+    name: 'dsh-tiny-tool'
+    config:
+      # On by default: non-exempt tools are sent with EMPTY parameters ({})
+      # instead of a trimmed/minified schema. Set to false to minify schemas
+      # (structure kept, descriptions stripped). Resolves via schema
+      # z.boolean().default(true) in src/index.ts:30 when unset.
+      emptyParameters: true
+      # Tool names to keep FULLY visible (do not hide their descriptions).
+      # Default: none — only the bridge tools are always exempt (src/engine.ts).
+      exemptTools: []
+      # Tool name prefixes to keep FULLY visible (e.g. ['mnemon_']).
+      # Default: none. Matches engine's `name.startsWith(prefix)` exemption.
+      exemptPrefixes: []
