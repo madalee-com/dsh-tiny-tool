@@ -142,6 +142,10 @@ export class TinyToolEngine {
   private snapshotCatalog(): void {
     const schemas = this.ctx.tools.schemas(undefined)
     for (const schema of schemas) {
+      // Skip our own `use_<name>` proxy stubs — they are emitted from their base
+      // tool, never stored as catalog entries, so they can't re-nest into
+      // `use_use_<name>` on a later assembly.
+      if (schema.name.startsWith('use_')) continue
       this.catalog.set(schema.name, {
         name: schema.name,
         description: schema.description ?? '',
@@ -212,6 +216,8 @@ export class TinyToolEngine {
     // through ctx.tools.register() (e.g., remote service methods like read/write).
     const tools = assembly.tools ?? []
     for (const tool of tools) {
+      // Ignore proxy stubs: they are rendered from their base tool, not stored.
+      if (tool.name.startsWith('use_')) continue
       if (!this.catalog.has(tool.name)) {
         this.catalog.set(tool.name, {
           name: tool.name,
@@ -220,8 +226,12 @@ export class TinyToolEngine {
         })
       }
     }
-    const stubbedTools: ToolSchema[] = tools.map(tool => {
-      const entry = this.catalog.get(tool.name)
+    // Base tools become `use_<name>` proxies; our own proxy stubs are dropped
+    // here (they were emitted from their base tool above) so they never re-nest.
+    const stubbedTools: ToolSchema[] = tools
+      .filter(tool => !tool.name.startsWith('use_'))
+      .map(tool => {
+        const entry = this.catalog.get(tool.name)
       if (entry === undefined) {
         // Tool not in catalog — render a `use_<name>` proxy with truncated desc
         const desc = (tool.description ?? '') as string
