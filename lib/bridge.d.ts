@@ -6,6 +6,10 @@ import { Context } from '@deepseek-ai/cordis';
 import type { TinyToolEngine } from './engine.js';
 /** The bridge tool names. */
 export declare const BRIDGE_NAMES: readonly ["tool_search", "tool_describe"];
+export declare function textRender(_args: unknown, value: unknown): {
+    type: "text";
+    text: string;
+}[];
 /**
  * Register the bridge tools. Each returns a JSON string so
  * the model can parse results directly; failures return a JSON `{ error }`

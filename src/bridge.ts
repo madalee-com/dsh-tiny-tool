@@ -15,7 +15,7 @@ type BridgeDeps = {
   describe: (name: string) => import('./engine.js').ToolSchema | undefined
 }
 
-function textRender(_args: unknown, value: unknown) {
+export function textRender(_args: unknown, value: unknown) {
   return [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value) }]
 }
 

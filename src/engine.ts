@@ -4,7 +4,8 @@
  */
 
 import { Context } from '@deepseek-ai/cordis'
-import { BRIDGE_NAMES } from './bridge.js'
+import { defineTool } from '@deepseek-ai/dsh-tools'
+import { BRIDGE_NAMES, textRender } from './bridge.js'
 export type ToolSchema = { name: string; description: string; parameters: Record<string, unknown> }
 import type { PromptAssembly, AssembleContext } from '@deepseek-ai/dsh-system-prompt'
 
@@ -23,78 +24,11 @@ export interface TinyToolConfig {
   exemptTools?: string[]
   /** Tool name prefixes to keep fully visible (e.g. ['mnemon_']). */
   exemptPrefixes?: string[]
-  /** When true, non-exempt tools are sent with empty parameters instead of a trimmed schema. On by default. */
+  /** Retained for backward compatibility. The proxy scheme now always sends
+   * empty `{}` params on proxies, so this flag is effectively a no-op. */
   emptyParameters?: boolean
 }
 
-/**
- * Minify a JSON Schema by stripping descriptive metadata while preserving
- * structural typing (property names, types, required fields).
- */
-function minifySchema(schema: unknown): unknown {
-  if (schema === null || schema === undefined) return schema
-  if (typeof schema !== 'object') return schema
-
-  const obj = schema as Record<string, unknown>
-
-  // Leaf node: strip descriptive fields but keep type
-  if (!('properties' in obj) && !('items' in obj) && !('oneOf' in obj) && !('allOf' in obj) && !('anyOf' in obj)) {
-    const minified: Record<string, unknown> = {}
-    for (const key of Object.keys(obj)) {
-      if (key === 'description' || key === 'default' || key === 'enum' || key === 'const' || key === 'title' || key === 'examples' || key === 'pattern' || key === 'format') continue
-      minified[key] = obj[key]
-    }
-    return minified
-  }
-
-  // Strip descriptive keys from root before recursing
-  const keepKeys = new Set(['type', 'properties', 'items', 'required', 'oneOf', 'allOf', 'anyOf', 'additionalProperties', 'pattern', 'format', 'minimum', 'maximum', 'default', 'enum', 'const', 'title', 'examples'])
-  const stripped: Record<string, unknown> = {}
-  for (const [k, v] of Object.entries(obj)) {
-    if (!['description', 'title', 'examples', 'pattern', 'format'].includes(k)) {
-      stripped[k] = v
-    }
-  }
-
-  // Object with properties: recurse into each property
-  if ('properties' in stripped && Array.isArray(stripped.properties)) {
-    const minified = { ...stripped }
-    if (Array.isArray(minified.properties)) {
-      minified.properties = minified.properties.map(p => minifySchema(p))
-    }
-    return minified
-  }
-
-  // Object with properties map
-  if ('properties' in stripped && typeof stripped.properties === 'object' && stripped.properties !== null) {
-    const minified = { ...stripped }
-    const props = stripped.properties as Record<string, unknown>
-    const minifiedProps: Record<string, unknown> = {}
-    for (const [key, value] of Object.entries(props)) {
-      minifiedProps[key] = minifySchema(value)
-    }
-    minified.properties = minifiedProps
-    return minified
-  }
-
-  // Array items
-  if ('items' in stripped) {
-    const minified = { ...stripped }
-    minified.items = minifySchema(stripped.items)
-    return minified
-  }
-
-  // Union schemas
-  for (const key of ['oneOf', 'allOf', 'anyOf'] as const) {
-    if (key in stripped && Array.isArray(stripped[key])) {
-      const minified = { ...stripped }
-      minified[key] = stripped[key].map(s => minifySchema(s))
-      return minified
-    }
-  }
-
-  return schema
-}
 /**
  * Extract the first sentence from a description, including its terminating punctuation.
  */
@@ -105,15 +39,20 @@ function extractFirstSentence(description: string): string {
 
 /**
  * The dsh-tiny-tool engine: snapshots the tool catalog and transforms every
- * system-prompt assembly to hide all tool descriptions behind minimum versions,
- * except for any explicitly exempted tools.
+ * system-prompt assembly so each non-exempt, non-revealed tool appears as a
+ * `use_<name>` proxy (truncated description, empty params `{}`). Calling a
+ * proxy swaps in the real base tool with its full schema for the rest of the
+ * session. The full schemas remain in-memory for on-demand `tool_describe`.
  */
 export class TinyToolEngine {
   private readonly ctx: Context
   private readonly catalog = new Map<string, CatalogEntry>()
   private readonly exemptTools = new Set<string>()
   private readonly exemptPrefixes = new Set<string>()
-  private readonly emptyParameters: boolean
+  /** Base tool names whose full schema has been revealed to the model this session. */
+  private readonly revealed = new Set<string>()
+  /** One-time proxy disposer per base tool name, removed after its `use_<name>` is called. */
+  private readonly proxies = new Map<string, () => void>()
 
   constructor(ctx: Context, config: TinyToolConfig = {}) {
     this.ctx = ctx
@@ -131,17 +70,62 @@ export class TinyToolEngine {
         this.exemptPrefixes.add(prefix)
       }
     }
-    // On by default: empty tool parameters instead of trimming, unless explicitly disabled.
-    this.emptyParameters = config.emptyParameters !== false
     console.error(`[dsh-tiny-tool] apply() config received: ${JSON.stringify(config)}`)
     // Register the assemble hook explicitly
     ctx.on('system-prompt/assemble', this.assemble.bind(this))
-    // Register the pre-step hook to inject tool_describe instruction as context
-    ctx.on('agent/pre-step', this.preStep.bind(this), { prepend: true })
+    // Register `use_<name>` proxy stubs for every non-exempt tool. The model
+    // calls the proxy, which swaps in the real base tool with its full schema.
+    this.registerProxies()
   }
 
   /**
-   * Check if a tool name should be exempt from minification.
+   * Register a one-shot `use_<name>` proxy stub for every non-exempt tool.
+   * Calling a proxy reveals the real base tool (full schema) for the rest of
+   * the session and removes itself from the registry. Bridge tools and exempt
+   * tools keep their full schemas untouched.
+   */
+  private registerProxies(): void {
+    this.snapshotCatalog()
+    const registered = this.ctx.tools.schemas()
+    // Capture mutable state as locals so the proxy `execute` closure can mutate
+    // the session state without relying on a bound `this`.
+    const revealed = this.revealed
+    const proxies = this.proxies
+    for (const entry of this.catalog.values()) {
+      if (this.isExempt(entry.name)) continue
+      // Guard against name clashes: skip tools whose proxy already exists.
+      const proxyName = `use_${entry.name}`
+      if (registered.some(r => r.name === proxyName)) continue
+
+      const baseName = entry.name
+      const fullParameters = entry.parameters ?? {}
+      proxies.set(baseName, this.ctx.tools.register(
+        defineTool({
+          name: proxyName,
+          description: `Invoke to enable ${baseName} with its full parameters.`,
+          parameters: {},
+          output: { schema: { type: 'string' }, render: textRender },
+          async execute() {
+            // Swap in the real base tool: mark revealed (session), dispose this
+            // one-shot proxy, and return the base tool's full parameter schema so
+            // the model can call the real tool directly.
+            revealed.add(baseName)
+            const disposer = proxies.get(baseName)
+            if (disposer) { disposer(); proxies.delete(baseName) }
+            return JSON.stringify({
+              action: 'use',
+              tool: baseName,
+              message: `use ${baseName} instead`,
+              schema: fullParameters,
+            })
+          },
+        })
+      ))
+    }
+  }
+
+  /**
+   * Check if a tool name should be exempt from the proxy scheme.
    */
   private isExempt(name: string): boolean {
     if (this.exemptTools.has(name)) return true
@@ -149,14 +133,6 @@ export class TinyToolEngine {
       if (name.startsWith(prefix)) return true
     }
     return false
-  }
-
-  /**
-   * Produce the system-prompt parameter schema for a tool entry. When enabled,
-   * non-exempt tools receive an empty JSON Schema (`{}`) rather than a trimmed one.
-   */
-  private transformParameters(parameters: unknown): unknown {
-    return this.emptyParameters ? {} : minifySchema(parameters)
   }
 
   /**
@@ -205,10 +181,11 @@ export class TinyToolEngine {
   }
 
   /**
-   * Transform one settled assembly: replace every tool schema with a minimum
-   * version (preserves property names and types, strips descriptions), except
-   * for any explicitly exempted tools which keep their full schema. The full
-   * schemas remain in-memory for `tool_describe`.
+   * Transform one settled assembly: every non-exempt, non-revealed tool is
+   * shown as a `use_<name>` proxy (truncated description, empty params `{}`),
+   * while revealed tools and exempt tools keep their full schema. A model that
+   * calls `use_<name>` swaps in the real base tool for the rest of the
+   * session. The full schemas remain in-memory for `tool_describe`.
    * @param assembly - the settled assembly from the waterfall chain.
    * @param _scope - the calling agent scope (unused).
    * @returns the transformed assembly.
@@ -246,79 +223,39 @@ export class TinyToolEngine {
     const stubbedTools: ToolSchema[] = tools.map(tool => {
       const entry = this.catalog.get(tool.name)
       if (entry === undefined) {
-        // Tool not in catalog — still truncate description
+        // Tool not in catalog — render a `use_<name>` proxy with truncated desc
         const desc = (tool.description ?? '') as string
         return {
-          name: tool.name,
+          name: `use_${tool.name}`,
           description: extractFirstSentence(desc),
-          parameters: this.transformParameters(tool.parameters) as ToolSchema['parameters'],
+          parameters: {},
         }
       }
-      if (this.isExempt(entry.name)) {
+      // Revealed tools keep their full schema; everything else becomes a proxy.
+      if (this.revealed.has(entry.name) || this.isExempt(entry.name)) {
         return { name: entry.name, description: entry.description, parameters: entry.parameters as ToolSchema['parameters'] }
       }
       return {
-        name: entry.name,
+        name: `use_${entry.name}`,
         description: extractFirstSentence(entry.description),
-        parameters: this.transformParameters(entry.parameters) as ToolSchema['parameters'],
+        parameters: {},
       }
     })
     // Also include any catalog tools not in the assembly (edge case)
     for (const entry of this.catalog.values()) {
-      if (!tools.some(t => t.name === entry.name)) {
-        stubbedTools.push({
-          name: entry.name,
-          description: this.isExempt(entry.name) ? entry.description : extractFirstSentence(entry.description),
-          parameters: this.transformParameters(entry.parameters) as ToolSchema['parameters'],
-        })
+      if (tools.some(t => t.name === entry.name)) continue
+      if (this.revealed.has(entry.name) || this.isExempt(entry.name)) {
+        stubbedTools.push({ name: entry.name, description: entry.description, parameters: entry.parameters as ToolSchema['parameters'] })
+        continue
       }
+      stubbedTools.push({
+        name: `use_${entry.name}`,
+        description: extractFirstSentence(entry.description),
+        parameters: {},
+      })
     }
     // Call next() to allow downstream listeners (e.g., mnemon) to run
     const result = next ? await next(assembly, _scope) : assembly
     return { ...result, tools: stubbedTools }
-  }
-
-  /**
-   * Inject the tool_describe instruction as a context message after the system prompt
-   * and after every compaction, similar to how mnemon injects its guidance.
-   */
-  async preStep(payload: any, next: (...args: unknown[]) => Promise<any>): Promise<any> {
-    const decision = await next()
-    // Only inject on step 1 (first turn of a session) and after compaction
-    if (payload?.step !== 1) return decision
-    // Check if we've already injected this instruction
-    const alreadyInjected = decision?.messages?.some((msg: any) => {
-      const source = msg?.source
-      // Match the producer-owned v4 source kind; also accept the retired
-      // `kind:'plugin'` wrapper for any instruction injected under an older
-      // dsh-tiny-tool build so compaction does not re-inject a duplicate.
-      return (
-        source?.kind === 'plugin:dsh-tiny-tool' ||
-        (source?.kind === 'plugin' && source?.plugin === 'dsh-tiny-tool')
-      )
-    })
-    if (alreadyInjected) return decision
-    if (!decision?.messages?.length) return decision
-    // Inject the instruction as a user message with a producer-owned v4 source.
-    // dsh v4's session format (dsh-session-format-v3-to-v4) rejects the retired
-    // `source.kind === 'plugin'` wrapper on encode, surfacing as "This turn
-    // failed: format v4 message requires a producer-owned source kind". The
-    // canonical producer-owned kind for this plugin is `plugin:<name>` per that
-    // package's producerKind mapping, which is exactly the shape it rewrites to
-    // at decode time — emit it directly instead of the retired v3 wrapper.
-    const instruction = 'use tool_describe before using other tools and after every tool failure, this is NON-NEGOTIABLE'
-    const pluginMessage = {
-      id: crypto.randomUUID(),
-      role: 'user' as const,
-      content: [{ type: 'text' as const, text: instruction }],
-      source: {
-        kind: 'plugin:dsh-tiny-tool' as const,
-        form: 'instructions' as const,
-      },
-    }
-    return {
-      kind: 'enter' as const,
-      messages: [...decision.messages, pluginMessage],
-    }
   }
 }
