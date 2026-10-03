@@ -37,7 +37,8 @@
   "license": "MIT",
   "scripts": {
     "build": "tsc -p tsconfig.build.json && tsdown --no-clean && mv lib/client.cjs lib/client.js && mv lib/client.cjs.map lib/client.js.map && echo build-ok",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify": "node scripts/verify-fix.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
