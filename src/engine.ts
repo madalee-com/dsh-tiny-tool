@@ -104,30 +104,6 @@ function extractFirstSentence(description: string): string {
 }
 
 /**
- * Detect whether a JSON-Schema parameter block declares any non-empty `required`
- * array anywhere in its structure. Tools with required args must keep their schema
- * (minified) to remain invokable; only tools that genuinely need no args may be
- * collapsed to a bare `{}`, otherwise the host rejects them and the injected
- * "after every tool failure -> use tool_describe" guidance loops.
- */
-function hasRequiredParameters(schema: unknown): boolean {
-  if (!schema || typeof schema !== 'object') return false
-  const obj = schema as Record<string, unknown>
-  const req = obj['required']
-  if (Array.isArray(req) && req.length > 0) return true
-  // Recurse into composite subschemas that may carry their own required arrays.
-  for (const key of ['oneOf', 'allOf', 'anyOf', 'items']) {
-    const v = obj[key]
-    if (Array.isArray(v)) {
-      for (const e of v) if (hasRequiredParameters(e)) return true
-    } else if (v && typeof v === 'object') {
-      if (hasRequiredParameters(v as Record<string, unknown>)) return true
-    }
-  }
-  return false
-}
-
-/**
  * The dsh-tiny-tool engine: snapshots the tool catalog and transforms every
  * system-prompt assembly to hide all tool descriptions behind minimum versions,
  * except for any explicitly exempted tools.
@@ -179,11 +155,7 @@ export class TinyToolEngine {
    * non-exempt tools receive an empty JSON Schema (`{}`) rather than a trimmed one.
    */
   private transformParameters(parameters: unknown): unknown {
-    // Only collapse to a bare {} when the tool genuinely declares no required args;
-    // stripping 'required' makes the tool non-invokable, which trips the injected
-    // "after every tool failure -> use tool_describe" guidance into an infinite loop.
-    if (this.emptyParameters && !hasRequiredParameters(parameters)) return {}
-    return minifySchema(parameters)
+    return this.emptyParameters ? {} : minifySchema(parameters)
   }
 
   /**
@@ -287,7 +259,7 @@ export class TinyToolEngine {
       return {
         name: entry.name,
         description: extractFirstSentence(entry.description),
-        parameters: minifySchema(entry.parameters) as ToolSchema['parameters'],
+        parameters: this.transformParameters(entry.parameters) as ToolSchema['parameters'],
       }
     })
     // Also include any catalog tools not in the assembly (edge case)
