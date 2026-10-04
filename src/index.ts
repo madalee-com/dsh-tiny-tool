@@ -3,9 +3,7 @@
  *
  * When loaded, this plugin replaces every tool schema in the model-visible
  * system prompt with a minimal stub (name only). The full schemas are kept
- * in-memory and exposed through bridge tools:
- *   - tool_describe(name) — returns the full schema for one tool
- *   - tool_search(query) — keyword-searches the catalog, returns matching names
+ * in-memory and re-exposed to the model once its `use_<name>` proxy is called.
  *
  * Configurable via settings namespace `tiny-tool-config`.
  *
@@ -14,7 +12,6 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { registerBridgeTools } from './bridge.js'
 import { TinyToolEngine, type TinyToolConfig } from './engine.js'
 
 export const name = 'dsh-tiny-tool'
@@ -39,7 +36,6 @@ export const TinyToolConfigSchema = z.object({
  */
 export function apply(ctx: Context, config: TinyToolConfig = {}) {
   const engine = new TinyToolEngine(ctx, config)
-  registerBridgeTools(ctx, engine)
 
   // Register settings namespace for UI configuration
   ctx.inject(['settings'], (settingsCtx: any) => {

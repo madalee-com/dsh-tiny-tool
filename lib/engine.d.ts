@@ -3,13 +3,13 @@
  * @module dsh-tiny-tool/engine
  */
 import { Context } from '@deepseek-ai/cordis';
+import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt';
 export type ToolSchema = {
     name: string;
     description: string;
     parameters: Record<string, unknown>;
 };
-import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt';
-/** One captured catalog entry — the full schema kept for on-demand describe. */
+/** One captured catalog entry — the full schema retained for re-exposure in later assemblies. */
 export interface CatalogEntry {
     name: string;
     description: string;
@@ -32,7 +32,7 @@ export interface TinyToolConfig {
  * system-prompt assembly so each non-exempt, non-revealed tool appears as a
  * `use_<name>` proxy (truncated description, empty params `{}`). Calling a
  * proxy swaps in the real base tool with its full schema for the rest of the
- * session. The full schemas remain in-memory for on-demand `tool_describe`.
+ * session, where its full schema is re-exposed by the next assembly.
  */
 export declare class TinyToolEngine {
     private readonly ctx;
@@ -47,8 +47,8 @@ export declare class TinyToolEngine {
     /**
      * Register a one-shot `use_<name>` proxy stub for every non-exempt tool.
      * Calling a proxy reveals the real base tool (full schema) for the rest of
-     * the session and removes itself from the registry. Bridge tools and exempt
-     * tools keep their full schemas untouched.
+     * the session and removes itself from the registry. Exempt tools keep their
+     * full schemas untouched.
      */
     private registerProxies;
     /**
@@ -61,25 +61,11 @@ export declare class TinyToolEngine {
      */
     private snapshotCatalog;
     /**
-     * Return the full schema for one tool, or undefined if unknown.
-     * Used by the `tool_describe` bridge tool.
-     * @param name - the tool name.
-     * @returns the full schema, or undefined.
-     */
-    describe(name: string): ToolSchema | undefined;
-    /**
-     * Keyword-search the catalog. Returns matching tool names.
-     * Used by the `tool_search` bridge tool.
-     * @param query - the search query (case-insensitive substring match).
-     * @returns matching tool names.
-     */
-    search(query: string): string[];
-    /**
      * Transform one settled assembly: every non-exempt, non-revealed tool is
      * shown as a `use_<name>` proxy (truncated description, empty params `{}`),
      * while revealed tools and exempt tools keep their full schema. A model that
      * calls `use_<name>` swaps in the real base tool for the rest of the
-     * session. The full schemas remain in-memory for `tool_describe`.
+     * session, where its full schema is re-exposed by the next assembly.
      * @param assembly - the settled assembly from the waterfall chain.
      * @param _scope - the calling agent scope (unused).
      * @returns the transformed assembly.

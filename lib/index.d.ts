@@ -3,9 +3,7 @@
  *
  * When loaded, this plugin replaces every tool schema in the model-visible
  * system prompt with a minimal stub (name only). The full schemas are kept
- * in-memory and exposed through bridge tools:
- *   - tool_describe(name) — returns the full schema for one tool
- *   - tool_search(query) — keyword-searches the catalog, returns matching names
+ * in-memory and re-exposed to the model once its `use_<name>` proxy is called.
  *
  * Configurable via settings namespace `tiny-tool-config`.
  *

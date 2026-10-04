@@ -5,11 +5,16 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { BRIDGE_NAMES, textRender } from './bridge.js'
-export type ToolSchema = { name: string; description: string; parameters: Record<string, unknown> }
 import type { PromptAssembly, AssembleContext } from '@deepseek-ai/dsh-system-prompt'
 
-/** One captured catalog entry — the full schema kept for on-demand describe. */
+export type ToolSchema = { name: string; description: string; parameters: Record<string, unknown> }
+
+/** Render a tool result as plain text so the model can read it directly. */
+function textRender(_args: unknown, value: unknown) {
+  return [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value) }]
+}
+
+/** One captured catalog entry — the full schema retained for re-exposure in later assemblies. */
 export interface CatalogEntry {
   name: string
   description: string
@@ -42,7 +47,7 @@ function extractFirstSentence(description: string): string {
  * system-prompt assembly so each non-exempt, non-revealed tool appears as a
  * `use_<name>` proxy (truncated description, empty params `{}`). Calling a
  * proxy swaps in the real base tool with its full schema for the rest of the
- * session. The full schemas remain in-memory for on-demand `tool_describe`.
+ * session, where its full schema is re-exposed by the next assembly.
  */
 export class TinyToolEngine {
   private readonly ctx: Context
@@ -56,10 +61,6 @@ export class TinyToolEngine {
 
   constructor(ctx: Context, config: TinyToolConfig = {}) {
     this.ctx = ctx
-    // Always exempt bridge tools — they need descriptions to function
-    for (const name of BRIDGE_NAMES) {
-      this.exemptTools.add(name)
-    }
     if (config.exemptTools) {
       for (const name of config.exemptTools) {
         this.exemptTools.add(name)
@@ -78,8 +79,8 @@ export class TinyToolEngine {
   /**
    * Register a one-shot `use_<name>` proxy stub for every non-exempt tool.
    * Calling a proxy reveals the real base tool (full schema) for the rest of
-   * the session and removes itself from the registry. Bridge tools and exempt
-   * tools keep their full schemas untouched.
+   * the session and removes itself from the registry. Exempt tools keep their
+   * full schemas untouched.
    */
   private registerProxies(): void {
     this.snapshotCatalog()
@@ -95,7 +96,6 @@ export class TinyToolEngine {
       if (registered.some(r => r.name === proxyName)) continue
 
       const baseName = entry.name
-      const fullParameters = entry.parameters ?? {}
       proxies.set(baseName, this.ctx.tools.register(
         defineTool({
           name: proxyName,
@@ -104,8 +104,9 @@ export class TinyToolEngine {
           output: { schema: { type: 'string' }, render: textRender },
           async execute() {
             // Swap in the real base tool: mark revealed (session), dispose this
-            // one-shot proxy, and return the base tool's full parameter schema so
-            // the model can call the real tool directly.
+            // one-shot proxy, and instruct the model to call the real tool. Its
+            // full parameter schema is re-exposed by the next assembly once
+            // revealed, so it is intentionally not echoed here.
             revealed.add(baseName)
             const disposer = proxies.get(baseName)
             if (disposer) { disposer(); proxies.delete(baseName) }
@@ -113,7 +114,6 @@ export class TinyToolEngine {
               action: 'use',
               tool: baseName,
               message: `use ${baseName} instead`,
-              schema: fullParameters,
             })
           },
         })
@@ -152,41 +152,11 @@ export class TinyToolEngine {
   }
 
   /**
-   * Return the full schema for one tool, or undefined if unknown.
-   * Used by the `tool_describe` bridge tool.
-   * @param name - the tool name.
-   * @returns the full schema, or undefined.
-   */
-  describe(name: string): ToolSchema | undefined {
-    const entry = this.catalog.get(name)
-    if (entry === undefined) return undefined
-    return { name: entry.name, description: entry.description, parameters: entry.parameters as ToolSchema['parameters'] }
-  }
-
-  /**
-   * Keyword-search the catalog. Returns matching tool names.
-   * Used by the `tool_search` bridge tool.
-   * @param query - the search query (case-insensitive substring match).
-   * @returns matching tool names.
-   */
-  search(query: string): string[] {
-    const lower = query.toLowerCase()
-    const matches: string[] = []
-    for (const entry of this.catalog.values()) {
-      if (entry.name.toLowerCase().includes(lower)
-        || entry.description.toLowerCase().includes(lower)) {
-        matches.push(entry.name)
-      }
-    }
-    return matches
-  }
-
-  /**
    * Transform one settled assembly: every non-exempt, non-revealed tool is
    * shown as a `use_<name>` proxy (truncated description, empty params `{}`),
    * while revealed tools and exempt tools keep their full schema. A model that
    * calls `use_<name>` swaps in the real base tool for the rest of the
-   * session. The full schemas remain in-memory for `tool_describe`.
+   * session, where its full schema is re-exposed by the next assembly.
    * @param assembly - the settled assembly from the waterfall chain.
    * @param _scope - the calling agent scope (unused).
    * @returns the transformed assembly.
