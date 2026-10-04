@@ -110,11 +110,10 @@ export class TinyToolEngine {
             revealed.add(baseName)
             const disposer = proxies.get(baseName)
             if (disposer) { disposer(); proxies.delete(baseName) }
-            return JSON.stringify({
-              action: 'use',
-              tool: baseName,
-              message: `use ${baseName} instead`,
-            })
+            // Surface the swap-in instruction as an error result (isError: true),
+            // matching the framework convention for a failed tool call. The text is
+            // rendered by the host as `Error: <message>`.
+            throw new Error(`use_${baseName} removed, use ${baseName} instead`)
           },
         })
       ))
