@@ -73,9 +73,6 @@ export class TinyToolEngine {
     console.error(`[dsh-tiny-tool] apply() config received: ${JSON.stringify(config)}`)
     // Register the assemble hook explicitly
     ctx.on('system-prompt/assemble', this.assemble.bind(this))
-    // Register `use_<name>` proxy stubs for every non-exempt tool. The model
-    // calls the proxy, which swaps in the real base tool with its full schema.
-    this.registerProxies()
   }
 
   /**
@@ -195,8 +192,12 @@ export class TinyToolEngine {
    * @returns the transformed assembly.
    */
   async assemble(assembly: PromptAssembly, _scope?: unknown, next?: (...args: unknown[]) => Promise<PromptAssembly>): Promise<PromptAssembly> {
-    // Re-snapshot catalog fresh on each assemble to catch all registered tools
+    // Re-snapshot catalog fresh on each assemble to catch all registered tools,
+    // including base tools registered after apply; then register `use_<name>`
+    // proxies against the current catalog so they are dispatchable. Idempotent:
+    // registerProxies() skips any proxy already present in ctx.tools.
     this.snapshotCatalog()
+    this.registerProxies()
     if (this.catalog.size === 0) return assembly
     // Skip transformation for subagent contexts — they need full tool schemas
     let agent: any
