@@ -113,9 +113,18 @@ export class TinyToolEngine {
         disposer()  // immediately remove the original tool from the registry
       }
 
+      // Guard: if the name is already occupied by ANY definition (our proxy or another plugin),
+      // skip registration entirely to avoid "already registered" collisions.
+      const existing = this.ctx.tools.get(proxyName)
+      if (existing) {
+        console.error(`[dsh-tiny-tool] Skipping proxy registration for ${proxyName}: already occupied by ${existing.name}`)
+        continue
+      }
+
       // Capture ctx reference so the closure can mark tools as revealed
       const toolCtx = this.ctx
-      proxies.set(renamedHandle, toolCtx.tools.register(
+      try {
+        proxies.set(renamedHandle, toolCtx.tools.register(
         defineTool({
           name: proxyName,
           description: `Invoke to access ${originalName}.`,
@@ -158,6 +167,9 @@ export class TinyToolEngine {
       ))
       // Track the proxy name so we skip re-registration on subsequent assemble() cycles.
       this.registeredProxyNames.add(proxyName)
+    } catch (err: unknown) {
+      console.error(`[dsh-tiny-tool] Proxy registration failed for ${proxyName}: ${err}`)
+    }
     }
   }
 
