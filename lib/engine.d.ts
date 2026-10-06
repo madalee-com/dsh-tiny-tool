@@ -30,11 +30,10 @@ export interface TinyToolConfig {
 }
 /**
  * The dsh-tiny-tool engine: renames every base tool to `tt_<name>` internally,
- * registers proxy stubs under the original `<name>` (no `use_` prefix), and
- * transforms every system-prompt assembly so each non-exempt, non-revealed
+ * registers a monotonic guard that intercepts calls and applies the three-rule
+ * swap-in logic (forward, error+swap, or forward+swap).
+ * Transforms system-prompt assemblies so each non-exempt, non-revealed
  * tool appears as a proxy stub (truncated description, empty params `{}`).
- * Calling a proxy triggers a three-rule swap-in: forward (no original params),
- * error+swap (original has params but none passed), or forward+swap (params passed).
  */
 export declare class TinyToolEngine {
     private readonly ctx;
@@ -43,20 +42,9 @@ export declare class TinyToolEngine {
     private readonly exemptPrefixes;
     /** Base tool names whose full schema has been revealed to the model this session. */
     private readonly revealed;
-    /** One-time proxy disposer per renamed handle, removed after its proxy is called. */
-    private readonly proxies;
     /** Original name → renamed handle mapping (e.g. "gitea_branches" → "tt_gitea_branches"). */
     private readonly renamedTo;
-    /** Names of proxy stubs we've already registered this session (prevents re-registration on subsequent assemble cycles). */
-    private readonly registeredProxyNames;
     constructor(ctx: Context, config?: TinyToolConfig);
-    /**
-     * Register a one-shot proxy stub for every non-exempt tool.
-     * Proxies are registered under the original `<name>` (no `use_` prefix).
-     * Internally, they point to the renamed handle (`tt_<name>`) in the catalog.
-     * Calling a proxy triggers the three-rule swap-in: forward, error+swap, or forward+swap.
-     */
-    private registerProxies;
     /**
      * Check if a tool name should be exempt from the proxy scheme.
      */
@@ -65,14 +53,13 @@ export declare class TinyToolEngine {
      * Capture the current full tool catalog from the registry.
      * Renames every base tool to `tt_<name>` internally to avoid name collisions
      * when proxies are registered under the original `<name>` (no `use_` prefix).
-     * Runs on each assemble() call to ensure tools are registered before capture.
      */
     private snapshotCatalog;
     /**
      * Transform one settled assembly: every non-exempt, non-revealed tool is
      * shown as a proxy stub (truncated description, empty params `{}`),
      * while revealed tools and exempt tools keep their full schema. A model that
-     * calls a proxy triggers the three-rule swap-in logic via the registered handler.
+     * calls a proxy triggers the three-rule swap-in logic via the monotonic guard.
      * @param assembly - the settled assembly from the waterfall chain.
      * @param _scope - the calling agent scope (unused).
      * @returns the transformed assembly.
