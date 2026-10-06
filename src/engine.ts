@@ -88,7 +88,6 @@ export class TinyToolEngine {
    */
   private registerProxies(): void {
     this.snapshotCatalog()
-    const registered = this.ctx.tools.schemas()
     // Capture mutable state as locals so the proxy `execute` closure can mutate
     // the session state without relying on a bound `this`.
     const revealed = this.revealed
@@ -97,9 +96,8 @@ export class TinyToolEngine {
 
     for (const [originalName, renamedHandle] of this.renamedTo.entries()) {
       if (this.isExempt(originalName)) continue
-      // Guard against name clashes: skip tools whose proxy already exists.
+      // No collision guard needed — the proxy IS meant to override any existing tool.
       const proxyName = originalName  // drop use_ prefix, use <name> directly
-      if (registered.some(r => r.name === proxyName)) continue
 
       // Capture ctx reference so the closure can mark tools as revealed
       const toolCtx = this.ctx
@@ -130,7 +128,7 @@ export class TinyToolEngine {
             }
 
             // Rule 2: Original has params but none passed → error + swap
-            if (Object.keys(args).length === 0) {
+            if (!args || Object.keys(args).length === 0) {
               throw new Error('Review tool parameters and try again.')
             }
 
@@ -216,8 +214,8 @@ export class TinyToolEngine {
     const stubbedTools: ToolSchema[] = tools
       .filter(tool => !tool.name.startsWith('tt_') && !tool.name.startsWith('use_'))
       .map(tool => {
-        // Look up by original name — strip tt_ if present to find the key
-        const lookupKey = tool.name.startsWith('tt_') ? tool.name.slice(3) : tool.name
+        // Look up by renamed handle — prepend tt_ for model-facing names
+        const lookupKey = tool.name.startsWith('tt_') ? tool.name : `tt_${tool.name}`
         const entry = this.catalog.get(lookupKey)
 
         if (entry === undefined) {
