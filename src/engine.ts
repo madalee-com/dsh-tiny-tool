@@ -44,21 +44,18 @@ function extractFirstSentence(description: string): string {
 }
 
 /**
- * The dsh-tiny-tool engine: renames every base tool to `tt_<name>` internally,
- * registers a monotonic guard that intercepts calls and marks them as revealed
- * so subsequent assemblies swap in the full tool schema (description + parameters).
- * Transforms system-prompt assemblies so each non-exempt, non-revealed
- * tool appears as a proxy stub (truncated description, empty params `{}`).
+ * The dsh-tiny-tool engine: captures the full tool catalog, transforms assemblies
+ * to show proxy stubs (truncated desc, empty params), and uses a monotonic guard
+ * to remove original tools from view and re-register them with full parameters
+ * after the first call — so subsequent calls see the correct schema in context.
  */
 export class TinyToolEngine {
   private readonly ctx: Context
   private readonly catalog = new Map<string, CatalogEntry>()
   private readonly exemptTools = new Set<string>()
   private readonly exemptPrefixes = new Set<string>()
-  /** Base tool names whose full schema has been revealed to the model this session. */
-  private readonly revealed = new Set<string>()
-  /** Original name → renamed handle mapping (e.g. "gitea_branches" → "tt_gitea_branches"). */
-  private readonly renamedTo = new Map<string, string>()
+  /** Disposers for tools we've replaced — used to restore on session teardown. */
+  private readonly disposers = new Map<string, () => void>()
 
   constructor(ctx: Context, config: TinyToolConfig = {}) {
     this.ctx = ctx
@@ -75,11 +72,10 @@ export class TinyToolEngine {
     console.error(`[dsh-tiny-tool] apply() config received: ${JSON.stringify(config)}`)
     // Register the assemble hook explicitly
     ctx.on('system-prompt/assemble', this.assemble.bind(this))
-    // Register a monotonic guard that lets calls through and marks tools as revealed.
-    // This avoids "already registered" errors from trying to register proxies in the registry.
-    const revealed = this.revealed
+    // Register a monotonic guard that swaps out original tools with full-schema versions.
     const catalog = this.catalog
     const isExempt = this.isExempt.bind(this)
+    const disposers = this.disposers
     ctx.tools.guard((exec: Readonly<ToolExecution>): string | undefined => {
       const toolName = exec.name
       if (isExempt(toolName)) return undefined
@@ -89,9 +85,31 @@ export class TinyToolEngine {
       const entry = catalog.get(lookupKey)
       if (!entry) return undefined  // not a known tool, let it through
 
-      // Mark as revealed on first use — next assembly will swap in full schema
-      revealed.add(lookupKey)
-      return undefined  // allow the call to proceed to the real tool
+      const hasOriginalParams = entry.parameters &&
+        Object.keys(entry.parameters as Record<string, unknown>).length > 0
+
+      // If the original has params and we haven't swapped it in yet, remove + re-add with full schema.
+      // This ensures the model sees the correct tool definition before its next call.
+      if (hasOriginalParams && !disposers.has(toolName)) {
+        try {
+          // Hide the original from the model's view
+          const disposer = ctx.tools.restrict({ deny: [toolName] })
+          disposers.set(toolName, disposer)
+          // Register our version with full parameters and description
+          ctx.tools.register({
+            name: toolName,
+            description: entry.description ?? '',
+            parameters: entry.parameters as Record<string, unknown>,
+            output: { schema: {}, render: textRender },
+            execute: async () => undefined,
+          })
+        } catch {
+          // If restrict or register throws (e.g., reserved tool), fall through silently
+          // The model will still see the stub from assembly transformation.
+          return undefined
+        }
+      }
+      return undefined  // allow the call to proceed
     })
   }
 
@@ -118,7 +136,6 @@ export class TinyToolEngine {
       if (schema.name.startsWith('use_') || schema.name.startsWith('tt_')) continue
 
       const renamedHandle = `tt_${schema.name}`
-      this.renamedTo.set(schema.name, renamedHandle)
       this.catalog.set(renamedHandle, {
         name: renamedHandle,
         description: schema.description ?? '',
@@ -128,10 +145,10 @@ export class TinyToolEngine {
   }
 
   /**
-   * Transform one settled assembly: every non-exempt, non-revealed tool is
+   * Transform one settled assembly: every non-exempt, non-replaced tool is
    * shown as a proxy stub (truncated description, empty params `{}`),
-   * while revealed tools and exempt tools keep their full schema. A model that
-   * calls a tool triggers the guard which marks it as revealed for the next assembly.
+   * while replaced tools (full schema registered) and exempt tools keep
+   * their complete schema.
    * @param assembly - the settled assembly from the waterfall chain.
    * @param _scope - the calling agent scope (unused).
    * @returns the transformed assembly.
@@ -162,10 +179,11 @@ export class TinyToolEngine {
             parameters: {},
           }
         }
-        // Revealed tools keep their full schema; everything else becomes a proxy stub (no use_ prefix).
-        if (this.revealed.has(entry.name) || this.isExempt(lookupKey)) {
-          return { name: lookupKey, description: entry.description, parameters: entry.parameters as ToolSchema['parameters'] }
+        // Tools we've replaced (full schema registered via guard) keep their complete schema.
+        if (this.disposers.has(tool.name)) {
+          return { name: tool.name, description: entry.description, parameters: entry.parameters as ToolSchema['parameters'] }
         }
+        // Everything else becomes a proxy stub (no use_ prefix).
         return {
           name: tool.name.startsWith('tt_') ? tool.name.slice(3) : tool.name,  // no use_ prefix
           description: extractFirstSentence(entry.description),
@@ -177,7 +195,8 @@ export class TinyToolEngine {
     for (const entry of this.catalog.values()) {
       const lookupKey = entry.name.startsWith('tt_') ? entry.name.slice(3) : entry.name
       if (tools.some(t => t.name === lookupKey || t.name === entry.name)) continue
-      if (this.revealed.has(entry.name) || this.isExempt(lookupKey)) {
+      // If we've replaced this tool, show full schema
+      if (this.disposers.has(lookupKey)) {
         stubbedTools.push({ name: lookupKey, description: entry.description, parameters: entry.parameters as ToolSchema['parameters'] })
         continue
       }

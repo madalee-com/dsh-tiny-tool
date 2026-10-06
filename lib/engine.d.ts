@@ -29,21 +29,18 @@ export interface TinyToolConfig {
     emptyParameters?: boolean;
 }
 /**
- * The dsh-tiny-tool engine: renames every base tool to `tt_<name>` internally,
- * registers a monotonic guard that intercepts calls and marks them as revealed
- * so subsequent assemblies swap in the full tool schema (description + parameters).
- * Transforms system-prompt assemblies so each non-exempt, non-revealed
- * tool appears as a proxy stub (truncated description, empty params `{}`).
+ * The dsh-tiny-tool engine: captures the full tool catalog, transforms assemblies
+ * to show proxy stubs (truncated desc, empty params), and uses a monotonic guard
+ * to remove original tools from view and re-register them with full parameters
+ * after the first call — so subsequent calls see the correct schema in context.
  */
 export declare class TinyToolEngine {
     private readonly ctx;
     private readonly catalog;
     private readonly exemptTools;
     private readonly exemptPrefixes;
-    /** Base tool names whose full schema has been revealed to the model this session. */
-    private readonly revealed;
-    /** Original name → renamed handle mapping (e.g. "gitea_branches" → "tt_gitea_branches"). */
-    private readonly renamedTo;
+    /** Disposers for tools we've replaced — used to restore on session teardown. */
+    private readonly disposers;
     constructor(ctx: Context, config?: TinyToolConfig);
     /**
      * Check if a tool name should be exempt from the proxy scheme.
@@ -56,10 +53,10 @@ export declare class TinyToolEngine {
      */
     private snapshotCatalog;
     /**
-     * Transform one settled assembly: every non-exempt, non-revealed tool is
+     * Transform one settled assembly: every non-exempt, non-replaced tool is
      * shown as a proxy stub (truncated description, empty params `{}`),
-     * while revealed tools and exempt tools keep their full schema. A model that
-     * calls a tool triggers the guard which marks it as revealed for the next assembly.
+     * while replaced tools (full schema registered) and exempt tools keep
+     * their complete schema.
      * @param assembly - the settled assembly from the waterfall chain.
      * @param _scope - the calling agent scope (unused).
      * @returns the transformed assembly.
