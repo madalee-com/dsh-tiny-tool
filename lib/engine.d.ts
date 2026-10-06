@@ -47,6 +47,8 @@ export declare class TinyToolEngine {
     private readonly proxies;
     /** Original name → renamed handle mapping (e.g. "gitea_branches" → "tt_gitea_branches"). */
     private readonly renamedTo;
+    /** Names of proxy stubs we've already registered this session (prevents re-registration on subsequent assemble cycles). */
+    private readonly registeredProxyNames;
     constructor(ctx: Context, config?: TinyToolConfig);
     /**
      * Register a one-shot proxy stub for every non-exempt tool.

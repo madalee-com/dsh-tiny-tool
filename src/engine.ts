@@ -62,6 +62,8 @@ export class TinyToolEngine {
   private readonly proxies = new Map<string, () => void>()
   /** Original name → renamed handle mapping (e.g. "gitea_branches" → "tt_gitea_branches"). */
   private readonly renamedTo = new Map<string, string>()
+  /** Names of proxy stubs we've already registered this session (prevents re-registration on subsequent assemble cycles). */
+  private readonly registeredProxyNames = new Set<string>()
 
   constructor(ctx: Context, config: TinyToolConfig = {}) {
     this.ctx = ctx
@@ -96,6 +98,9 @@ export class TinyToolEngine {
 
     for (const [originalName, renamedHandle] of this.renamedTo.entries()) {
       if (this.isExempt(originalName)) continue
+      // Skip proxies we already registered in a prior assemble cycle.
+      if (this.registeredProxyNames.has(originalName)) continue
+
       // No collision guard needed — the proxy IS meant to override any existing tool.
       const proxyName = originalName  // drop use_ prefix, use <name> directly
 
@@ -151,6 +156,8 @@ export class TinyToolEngine {
           },
         })
       ))
+      // Track the proxy name so we skip re-registration on subsequent assemble() cycles.
+      this.registeredProxyNames.add(proxyName)
     }
   }
 
