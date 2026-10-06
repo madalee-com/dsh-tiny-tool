@@ -99,6 +99,15 @@ export class TinyToolEngine {
       // No collision guard needed — the proxy IS meant to override any existing tool.
       const proxyName = originalName  // drop use_ prefix, use <name> directly
 
+      // Step 1: Register the original definition to get a disposer, then dispose it.
+      // This hides the original tool under its own name so our proxy can take that slot.
+      // The order matters: unregister BEFORE register (fixes "already registered" error).
+      const originalDef = this.ctx.tools.get(originalName)
+      if (originalDef) {
+        const disposer = this.ctx.tools.register({ ...originalDef })
+        disposer()  // immediately remove the original tool from the registry
+      }
+
       // Capture ctx reference so the closure can mark tools as revealed
       const toolCtx = this.ctx
       proxies.set(renamedHandle, toolCtx.tools.register(
