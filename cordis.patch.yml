@@ -1,21 +1,20 @@
 # dsh-tiny-tool bundle patch: inserts the plugin row over the profile root.
 #
-# The plugin hides all tool/MCP descriptions from the system prompt, replacing
-# them with minimal stubs. Full schemas are kept in-memory and exposed through
-# two bridge tools (tool_search / tool_describe).
+# The plugin renames base tools to `tt_<name>` internally, registers proxy stubs
+# under the original `<name>` (no `use_` prefix), and transforms system-prompt
+# assemblies so non-exempt tools appear as minimal stubs. Calling a proxy triggers
+# a three-rule swap-in: forward (no params), error+swap, or forward+swap.
 
 - insert:
   - id: dsh-tiny-tool
     name: 'dsh-tiny-tool'
     config:
-      # On by default: non-exempt tools are sent with EMPTY parameters ({})
-      # instead of a trimmed/minified schema. Set to false to minify schemas
-      # (structure kept, descriptions stripped). Resolves via schema
-      # z.boolean().default(true) in src/index.ts:30 when unset.
+      # Retained for backward compatibility. The three-rule proxy scheme now handles
+      # parameter routing at proxy-call time. This flag is effectively a no-op.
       emptyParameters: true
       # Tool names to keep FULLY visible (do not hide their descriptions).
       # Default: none — only the bridge tools are always exempt (src/engine.ts).
       exemptTools: []
       # Tool name prefixes to keep FULLY visible (e.g. ['mnemon_']).
-      # Default: none. Matches engine's `name.startsWith(prefix)` exemption.
+      # Matches engine's `name.startsWith(prefix)` exemption check.
       exemptPrefixes: []
