@@ -45,8 +45,8 @@ function extractFirstSentence(description: string): string {
 
 /**
  * The dsh-tiny-tool engine: renames every base tool to `tt_<name>` internally,
- * registers a monotonic guard that intercepts calls and applies the three-rule
- * swap-in logic (forward, error+swap, or forward+swap).
+ * registers a monotonic guard that intercepts calls and marks them as revealed
+ * so subsequent assemblies swap in the full tool schema (description + parameters).
  * Transforms system-prompt assemblies so each non-exempt, non-revealed
  * tool appears as a proxy stub (truncated description, empty params `{}`).
  */
@@ -75,8 +75,8 @@ export class TinyToolEngine {
     console.error(`[dsh-tiny-tool] apply() config received: ${JSON.stringify(config)}`)
     // Register the assemble hook explicitly
     ctx.on('system-prompt/assemble', this.assemble.bind(this))
-    // Register a monotonic guard to intercept tool calls and apply three-rule swap-in
-    // This is safer than trying to register proxies in the registry (avoids "already registered" errors).
+    // Register a monotonic guard that lets calls through and marks tools as revealed.
+    // This avoids "already registered" errors from trying to register proxies in the registry.
     const revealed = this.revealed
     const catalog = this.catalog
     const isExempt = this.isExempt.bind(this)
@@ -89,24 +89,9 @@ export class TinyToolEngine {
       const entry = catalog.get(lookupKey)
       if (!entry) return undefined  // not a known tool, let it through
 
-      const hasOriginalParams = entry.parameters &&
-        Object.keys(entry.parameters as Record<string, unknown>).length > 0
-
-      // Rule 1: No params on original → forward immediately, keep proxy alive
-      if (!hasOriginalParams) {
-        revealed.add(lookupKey)
-        return `Tool \`${toolName}\` is now available with full schema. Call it directly.`
-      }
-
-      // Rule 2: Original has params but none passed → error + swap
-      const args = exec.arguments as Record<string, unknown> | undefined
-      if (!args || Object.keys(args).length === 0) {
-        throw new Error('Review tool parameters and try again.')
-      }
-
-      // Rule 3: Original has params and args were passed → forward + swap
+      // Mark as revealed on first use — next assembly will swap in full schema
       revealed.add(lookupKey)
-      return `Tool \`${toolName}\` is now available with full schema — call it directly.`
+      return undefined  // allow the call to proceed to the real tool
     })
   }
 
@@ -146,7 +131,7 @@ export class TinyToolEngine {
    * Transform one settled assembly: every non-exempt, non-revealed tool is
    * shown as a proxy stub (truncated description, empty params `{}`),
    * while revealed tools and exempt tools keep their full schema. A model that
-   * calls a proxy triggers the three-rule swap-in logic via the monotonic guard.
+   * calls a tool triggers the guard which marks it as revealed for the next assembly.
    * @param assembly - the settled assembly from the waterfall chain.
    * @param _scope - the calling agent scope (unused).
    * @returns the transformed assembly.

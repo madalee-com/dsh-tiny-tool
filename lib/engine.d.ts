@@ -30,8 +30,8 @@ export interface TinyToolConfig {
 }
 /**
  * The dsh-tiny-tool engine: renames every base tool to `tt_<name>` internally,
- * registers a monotonic guard that intercepts calls and applies the three-rule
- * swap-in logic (forward, error+swap, or forward+swap).
+ * registers a monotonic guard that intercepts calls and marks them as revealed
+ * so subsequent assemblies swap in the full tool schema (description + parameters).
  * Transforms system-prompt assemblies so each non-exempt, non-revealed
  * tool appears as a proxy stub (truncated description, empty params `{}`).
  */
@@ -59,7 +59,7 @@ export declare class TinyToolEngine {
      * Transform one settled assembly: every non-exempt, non-revealed tool is
      * shown as a proxy stub (truncated description, empty params `{}`),
      * while revealed tools and exempt tools keep their full schema. A model that
-     * calls a proxy triggers the three-rule swap-in logic via the monotonic guard.
+     * calls a tool triggers the guard which marks it as revealed for the next assembly.
      * @param assembly - the settled assembly from the waterfall chain.
      * @param _scope - the calling agent scope (unused).
      * @returns the transformed assembly.
