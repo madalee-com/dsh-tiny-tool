@@ -1,11 +1,16 @@
 /**
- * The engine that captures the full catalog and transforms assemblies.
+ * The dsh-tiny-tool engine: captures the full catalog and transforms assemblies
+ * so each non-exempt, non-revealed tool is shown under its real name with a
+ * trimmed description and empty `{}` parameters. Calling such a tool "unhides"
+ * it for the rest of the session by registering its full definition scoped to
+ * the calling agent; the host re-assembles on the retry, so the model then sees
+ * the full parameters before the current turn proceeds.
  * @module dsh-tiny-tool/engine
  */
 
 import { Context } from '@deepseek-ai/cordis'
-import { defineTool } from '@deepseek-ai/dsh-tools'
-import type { PromptAssembly, AssembleContext } from '@deepseek-ai/dsh-system-prompt'
+import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
+import type { PreToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
 
 export type ToolSchema = { name: string; description: string; parameters: Record<string, unknown> }
 
@@ -25,13 +30,10 @@ export interface CatalogEntry {
  * Plugin configuration.
  */
 export interface TinyToolConfig {
-  /** Tool names to keep fully visible (do not hide descriptions). */
+  /** Tool names to keep fully visible (do not trim descriptions). */
   exemptTools?: string[]
   /** Tool name prefixes to keep fully visible (e.g. ['mnemon_']). */
   exemptPrefixes?: string[]
-  /** Retained for backward compatibility. The proxy scheme now always sends
-   * empty `{}` params on proxies, so this flag is effectively a no-op. */
-  emptyParameters?: boolean
 }
 
 /**
@@ -42,12 +44,15 @@ function extractFirstSentence(description: string): string {
   return match?.[1] ?? ''
 }
 
+// Loose structural shapes so `exec.agent.ctx.tools` can be accessed without the
+// (absent) `@deepseek-ai/dsh-agent` types being resolvable here.
+type ToolsRegisterLike = { register?: (def: unknown) => () => void }
+type AgentCtxLike = { tools?: ToolsRegisterLike }
+type AgentLike = { ctx?: AgentCtxLike }
+type ExecLike = { name: string; agent?: AgentLike }
+
 /**
- * The dsh-tiny-tool engine: snapshots the tool catalog and transforms every
- * system-prompt assembly so each non-exempt, non-revealed tool appears as a
- * `use_<name>` proxy (truncated description, empty params `{}`). Calling a
- * proxy swaps in the real base tool with its full schema for the rest of the
- * session, where its full schema is re-exposed by the next assembly.
+ * The dsh-tiny-tool engine.
  */
 export class TinyToolEngine {
   private readonly ctx: Context
@@ -56,72 +61,64 @@ export class TinyToolEngine {
   private readonly exemptPrefixes = new Set<string>()
   /** Base tool names whose full schema has been revealed to the model this session. */
   private readonly revealed = new Set<string>()
-  /** One-time proxy disposer per base tool name, removed after its `use_<name>` is called. */
-  private readonly proxies = new Map<string, () => void>()
 
   constructor(ctx: Context, config: TinyToolConfig = {}) {
     this.ctx = ctx
     if (config.exemptTools) {
-      for (const name of config.exemptTools) {
-        this.exemptTools.add(name)
-      }
+      for (const name of config.exemptTools) this.exemptTools.add(name)
     }
     if (config.exemptPrefixes) {
-      for (const prefix of config.exemptPrefixes) {
-        this.exemptPrefixes.add(prefix)
-      }
+      for (const prefix of config.exemptPrefixes) this.exemptPrefixes.add(prefix)
     }
     console.error(`[dsh-tiny-tool] apply() config received: ${JSON.stringify(config)}`)
-    // Register the assemble hook explicitly
+    // Register the assemble hook explicitly.
     ctx.on('system-prompt/assemble', this.assemble.bind(this))
+    // Reveal-on-execute: intercept calls to unrevealed, managed tools so the
+    // tool's full definition can be registered in the calling agent's scope.
+    ctx.on('tools/pre-execute', this.preExecute.bind(this))
   }
 
   /**
-   * Register a one-shot `use_<name>` proxy stub for every non-exempt tool.
-   * Calling a proxy reveals the real base tool (full schema) for the rest of
-   * the session and removes itself from the registry. Exempt tools keep their
-   * full schemas untouched.
+   * Reveal a base tool's full schema to exactly the calling agent by registering
+   * its full definition in that agent's scope, then mark it revealed for the
+   * rest of the session. Falls back to a plain reveal (mark + no register) when
+   * the agent context or the base definition is unavailable.
+   * @param name - the base tool name being revealed.
+   * @param exec - the in-flight execution, providing the caller's agent scope.
    */
-  private registerProxies(): void {
-    this.snapshotCatalog()
-    const registered = this.ctx.tools.schemas()
-    // Capture mutable state as locals so the proxy `execute` closure can mutate
-    // the session state without relying on a bound `this`.
-    const revealed = this.revealed
-    const proxies = this.proxies
-    for (const entry of this.catalog.values()) {
-      if (this.isExempt(entry.name)) continue
-      // Guard against name clashes: skip tools whose proxy already exists.
-      const proxyName = `use_${entry.name}`
-      if (registered.some(r => r.name === proxyName)) continue
-
-      const baseName = entry.name
-      proxies.set(baseName, this.ctx.tools.register(
-        defineTool({
-          name: proxyName,
-          description: `Invoke to enable ${baseName} with its full parameters.`,
-          parameters: {},
-          output: { schema: { type: 'string' }, render: textRender },
-          async execute() {
-            // Swap in the real base tool: mark revealed (session), dispose this
-            // one-shot proxy, and instruct the model to call the real tool. Its
-            // full parameter schema is re-exposed by the next assembly once
-            // revealed, so it is intentionally not echoed here.
-            revealed.add(baseName)
-            const disposer = proxies.get(baseName)
-            if (disposer) { disposer(); proxies.delete(baseName) }
-            // Surface the swap-in instruction as an error result (isError: true),
-            // matching the framework convention for a failed tool call. The text is
-            // rendered by the host as `Error: <message>`.
-            throw new Error(`use_${baseName} removed, use ${baseName} instead`)
-          },
-        })
-      ))
+  private unhideAgentScoped(name: string, exec: ToolExecution): void {
+    const execLike = exec as unknown as ExecLike
+    const agentTools = execLike.agent?.ctx?.tools
+    // `get` without a scope resolves the global base definition, which carries
+    // the real `execute` + canonical `output`. Registering it in the caller's
+    // scope shadows that base only for this agent.
+    const base = agentTools ? this.ctx.tools.get(name) : undefined
+    if (agentTools && base && agentTools.register) {
+      agentTools.register(base)
     }
+    this.revealed.add(name)
   }
 
   /**
-   * Check if a tool name should be exempt from the proxy scheme.
+   * `tools/pre-execute` waterfall: an unrevealed, non-exempt managed tool is
+   * hidden-until-called. Calling it registers the tool's full definition in the
+   * calling agent's scope (so the model sees its full parameters on the next
+   * assembly) and denies the call once so the host re-assembles and the model
+   * retries with arguments. Everything else passes through unchanged.
+   * @param exec - the in-flight execution.
+   * @param next - downstream decision in the waterfall.
+   * @returns `deny` for an unrevealed managed tool; otherwise passthrough.
+   */
+  private async preExecute(exec: ToolExecution, next: () => Promise<PreToolDecision>): Promise<PreToolDecision> {
+    const name = (exec as unknown as ExecLike).name
+    if (!this.catalog.has(name)) return next()
+    if (this.revealed.has(name) || this.isExempt(name)) return next()
+    this.unhideAgentScoped(name, exec)
+    return { kind: 'deny', reason: `${name} is now enabled with its full parameters; call it again with arguments.` }
+  }
+
+  /**
+   * Check if a tool name should be exempt from the trim scheme.
    */
   private isExempt(name: string): boolean {
     if (this.exemptTools.has(name)) return true
@@ -133,14 +130,13 @@ export class TinyToolEngine {
 
   /**
    * Capture the current full tool catalog from the registry.
-   * Runs on each assemble() call to ensure tools are registered before capture.
    */
   private snapshotCatalog(): void {
     const schemas = this.ctx.tools.schemas(undefined)
     for (const schema of schemas) {
-      // Skip our own `use_<name>` proxy stubs — they are emitted from their base
-      // tool, never stored as catalog entries, so they can't re-nest into
-      // `use_use_<name>` on a later assembly.
+      // Skip any residual proxy stubs — they are emitted from their base tool,
+      // never stored as catalog entries, so they can't re-nest on a later
+      // assembly.
       if (schema.name.startsWith('use_')) continue
       this.catalog.set(schema.name, {
         name: schema.name,
@@ -151,24 +147,21 @@ export class TinyToolEngine {
   }
 
   /**
-   * Transform one settled assembly: every non-exempt, non-revealed tool is
-   * shown as a `use_<name>` proxy (truncated description, empty params `{}`),
+   * Transform one settled assembly: every non-exempt, non-revealed tool is shown
+   * under its real name with a trimmed description and empty `{}` parameters,
    * while revealed tools and exempt tools keep their full schema. A model that
-   * calls `use_<name>` swaps in the real base tool for the rest of the
-   * session, where its full schema is re-exposed by the next assembly.
+   * calls such a tool unhides it for the rest of the session (see
+   * `preExecute`), where its full schema is re-exposed by the next assembly.
    * @param assembly - the settled assembly from the waterfall chain.
    * @param _scope - the calling agent scope (unused).
    * @returns the transformed assembly.
    */
   async assemble(assembly: PromptAssembly, _scope?: unknown, next?: (...args: unknown[]) => Promise<PromptAssembly>): Promise<PromptAssembly> {
-    // Re-snapshot catalog fresh on each assemble to catch all registered tools,
-    // including base tools registered after apply; then register `use_<name>`
-    // proxies against the current catalog so they are dispatchable. Idempotent:
-    // registerProxies() skips any proxy already present in ctx.tools.
+    // Re-snapshot the catalog fresh on each assemble so we capture base tools
+    // registered after apply(), before transforming in place.
     this.snapshotCatalog()
-    this.registerProxies()
     if (this.catalog.size === 0) return assembly
-    // Skip transformation for subagent contexts — they need full tool schemas
+    // Skip transformation for subagent contexts — they need full tool schemas.
     let agent: any
     try {
       agent = this.ctx.agents?.currentInitiator()
@@ -179,14 +172,11 @@ export class TinyToolEngine {
       const depth = ((agent.options as Record<string, unknown>)?.subagentDepth ?? (agent.session?.header as unknown as Record<string, unknown>)?.delegationDepth) ?? 0
       if ((depth as number) > 0) return assembly
     }
-    // Transform tools in-place: use assembly.tools as source of truth,
-    // falling back to catalog for any tools not in the assembly.
-    // This prevents losing tools if the catalog is incomplete.
-    // Also populate catalog from assembly.tools to capture tools not registered
-    // through ctx.tools.register() (e.g., remote service methods like read/write).
+    // Populate the catalog from the assembly's own tools too, so we can trim any
+    // tool not registered through ctx.tools.register (e.g., remote service
+    // methods like read/write).
     const tools = assembly.tools ?? []
     for (const tool of tools) {
-      // Ignore proxy stubs: they are rendered from their base tool, not stored.
       if (tool.name.startsWith('use_')) continue
       if (!this.catalog.has(tool.name)) {
         this.catalog.set(tool.name, {
@@ -196,43 +186,32 @@ export class TinyToolEngine {
         })
       }
     }
-    // Base tools become `use_<name>` proxies; our own proxy stubs are dropped
-    // here (they were emitted from their base tool above) so they never re-nest.
+    // Present base tools under their real name: revealed/exempt keep their full
+    // schema; every other managed tool is trimmed to its first sentence with
+    // empty `{}` parameters.
     const stubbedTools: ToolSchema[] = tools
       .filter(tool => !tool.name.startsWith('use_'))
       .map(tool => {
         const entry = this.catalog.get(tool.name)
-      if (entry === undefined) {
-        // Tool not in catalog — render a `use_<name>` proxy with truncated desc
-        const desc = (tool.description ?? '') as string
-        return {
-          name: `use_${tool.name}`,
-          description: extractFirstSentence(desc),
-          parameters: {},
+        if (entry === undefined) {
+          const desc = (tool.description ?? '') as string
+          return { name: tool.name, description: extractFirstSentence(desc), parameters: {} }
         }
-      }
-      // Revealed tools keep their full schema; everything else becomes a proxy.
-      if (this.revealed.has(entry.name) || this.isExempt(entry.name)) {
-        return { name: entry.name, description: entry.description, parameters: entry.parameters as ToolSchema['parameters'] }
-      }
-      return {
-        name: `use_${entry.name}`,
-        description: extractFirstSentence(entry.description),
-        parameters: {},
-      }
-    })
-    // Also include any catalog tools not in the assembly (edge case)
+        // Revealed and exempt tools keep their full schema.
+        if (this.revealed.has(entry.name) || this.isExempt(entry.name)) {
+          return { name: entry.name, description: entry.description, parameters: entry.parameters as ToolSchema['parameters'] }
+        }
+        // Otherwise trim to the real name, first sentence, and empty params.
+        return { name: entry.name, description: extractFirstSentence(entry.description), parameters: {} }
+      })
+    // Also include any catalog tools not present in the assembly (edge case).
     for (const entry of this.catalog.values()) {
       if (tools.some(t => t.name === entry.name)) continue
       if (this.revealed.has(entry.name) || this.isExempt(entry.name)) {
         stubbedTools.push({ name: entry.name, description: entry.description, parameters: entry.parameters as ToolSchema['parameters'] })
-        continue
+      } else {
+        stubbedTools.push({ name: entry.name, description: extractFirstSentence(entry.description), parameters: {} })
       }
-      stubbedTools.push({
-        name: `use_${entry.name}`,
-        description: extractFirstSentence(entry.description),
-        parameters: {},
-      })
     }
     // Call next() to allow downstream listeners (e.g., mnemon) to run
     const result = next ? await next(assembly, _scope) : assembly

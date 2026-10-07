@@ -1,5 +1,10 @@
 /**
- * The engine that captures the full catalog and transforms assemblies.
+ * The dsh-tiny-tool engine: captures the full catalog and transforms assemblies
+ * so each non-exempt, non-revealed tool is shown under its real name with a
+ * trimmed description and empty `{}` parameters. Calling such a tool "unhides"
+ * it for the rest of the session by registering its full definition scoped to
+ * the calling agent; the host re-assembles on the retry, so the model then sees
+ * the full parameters before the current turn proceeds.
  * @module dsh-tiny-tool/engine
  */
 import { Context } from '@deepseek-ai/cordis';
@@ -19,20 +24,13 @@ export interface CatalogEntry {
  * Plugin configuration.
  */
 export interface TinyToolConfig {
-    /** Tool names to keep fully visible (do not hide descriptions). */
+    /** Tool names to keep fully visible (do not trim descriptions). */
     exemptTools?: string[];
     /** Tool name prefixes to keep fully visible (e.g. ['mnemon_']). */
     exemptPrefixes?: string[];
-    /** Retained for backward compatibility. The proxy scheme now always sends
-     * empty `{}` params on proxies, so this flag is effectively a no-op. */
-    emptyParameters?: boolean;
 }
 /**
- * The dsh-tiny-tool engine: snapshots the tool catalog and transforms every
- * system-prompt assembly so each non-exempt, non-revealed tool appears as a
- * `use_<name>` proxy (truncated description, empty params `{}`). Calling a
- * proxy swaps in the real base tool with its full schema for the rest of the
- * session, where its full schema is re-exposed by the next assembly.
+ * The dsh-tiny-tool engine.
  */
 export declare class TinyToolEngine {
     private readonly ctx;
@@ -41,31 +39,41 @@ export declare class TinyToolEngine {
     private readonly exemptPrefixes;
     /** Base tool names whose full schema has been revealed to the model this session. */
     private readonly revealed;
-    /** One-time proxy disposer per base tool name, removed after its `use_<name>` is called. */
-    private readonly proxies;
     constructor(ctx: Context, config?: TinyToolConfig);
     /**
-     * Register a one-shot `use_<name>` proxy stub for every non-exempt tool.
-     * Calling a proxy reveals the real base tool (full schema) for the rest of
-     * the session and removes itself from the registry. Exempt tools keep their
-     * full schemas untouched.
+     * Reveal a base tool's full schema to exactly the calling agent by registering
+     * its full definition in that agent's scope, then mark it revealed for the
+     * rest of the session. Falls back to a plain reveal (mark + no register) when
+     * the agent context or the base definition is unavailable.
+     * @param name - the base tool name being revealed.
+     * @param exec - the in-flight execution, providing the caller's agent scope.
      */
-    private registerProxies;
+    private unhideAgentScoped;
     /**
-     * Check if a tool name should be exempt from the proxy scheme.
+     * `tools/pre-execute` waterfall: an unrevealed, non-exempt managed tool is
+     * hidden-until-called. Calling it registers the tool's full definition in the
+     * calling agent's scope (so the model sees its full parameters on the next
+     * assembly) and denies the call once so the host re-assembles and the model
+     * retries with arguments. Everything else passes through unchanged.
+     * @param exec - the in-flight execution.
+     * @param next - downstream decision in the waterfall.
+     * @returns `deny` for an unrevealed managed tool; otherwise passthrough.
+     */
+    private preExecute;
+    /**
+     * Check if a tool name should be exempt from the trim scheme.
      */
     private isExempt;
     /**
      * Capture the current full tool catalog from the registry.
-     * Runs on each assemble() call to ensure tools are registered before capture.
      */
     private snapshotCatalog;
     /**
-     * Transform one settled assembly: every non-exempt, non-revealed tool is
-     * shown as a `use_<name>` proxy (truncated description, empty params `{}`),
+     * Transform one settled assembly: every non-exempt, non-revealed tool is shown
+     * under its real name with a trimmed description and empty `{}` parameters,
      * while revealed tools and exempt tools keep their full schema. A model that
-     * calls `use_<name>` swaps in the real base tool for the rest of the
-     * session, where its full schema is re-exposed by the next assembly.
+     * calls such a tool unhides it for the rest of the session (see
+     * `preExecute`), where its full schema is re-exposed by the next assembly.
      * @param assembly - the settled assembly from the waterfall chain.
      * @param _scope - the calling agent scope (unused).
      * @returns the transformed assembly.
