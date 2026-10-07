@@ -164,12 +164,21 @@ export class TinyToolEngine {
 
   /**
     * Check whether a tool's schema is effectively empty — no arguments needed.
+    * Handles both bare `{}` and JSON Schema variants like
+    * `{type:'object', properties:{}}` where there are no required fields.
     */
   private isTrivialParameters(params: unknown): boolean {
     if (params == null) return true
-    if (typeof params !== 'object') return false
-    const keys = Object.keys(params as Record<string, unknown>)
-    return keys.length === 0
+    if (typeof params !== 'object' || Array.isArray(params)) return false
+    const obj = params as Record<string, unknown>
+    // Non-empty `required` array means mandatory args exist.
+    if (Array.isArray(obj.required) && obj.required.length > 0) return false
+    // Non-empty `properties` means named args exist.
+    const props = obj.properties
+    if (props && typeof props === 'object' && !Array.isArray(props)) {
+      if (Object.keys(props as Record<string, unknown>).length > 0) return false
+    }
+    return true
   }
 
   /**

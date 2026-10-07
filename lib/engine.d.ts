@@ -73,6 +73,8 @@ export declare class TinyToolEngine {
     private isExempt;
     /**
       * Check whether a tool's schema is effectively empty — no arguments needed.
+      * Handles both bare `{}` and JSON Schema variants like
+      * `{type:'object', properties:{}}` where there are no required fields.
       */
     private isTrivialParameters;
     /**
