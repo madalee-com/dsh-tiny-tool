@@ -94,7 +94,6 @@ export class TinyToolEngine {
     if (keepTheBasics) {
       for (const name of KEEP_THE_BASICS_TOOLS) this.revealed.add(name)
     }
-    console.error(`[dsh-tiny-tool] apply() config received: ${JSON.stringify(config)}`)
     // Register the assemble hook explicitly.
     ctx.on('system-prompt/assemble', this.assemble.bind(this))
     // Reveal-on-execute: intercept calls to unrevealed, managed tools so the
