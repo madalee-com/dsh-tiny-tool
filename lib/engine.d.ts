@@ -56,19 +56,25 @@ export declare class TinyToolEngine {
     private unhideAgentScoped;
     /**
      * `tools/pre-execute` waterfall: an unrevealed, non-exempt managed tool is
-     * hidden-until-called. Calling it registers the tool's full definition in the
-     * calling agent's scope (so the model sees its full parameters on the next
-     * assembly) and denies the call once so the host re-assembles and the model
-     * retries with arguments. Everything else passes through unchanged.
+     * hidden-until-called. Tools with trivial (empty `{}`) parameters are
+     * allowed through on first call and silently marked revealed — their full
+     * description then appears only on the next assemble. Non-trivial tools
+     * are registered in the calling agent's scope and denied once, triggering
+     * a host re-assemble so the model retries with arguments. Everything else
+     * passes through unchanged.
      * @param exec - the in-flight execution.
      * @param next - downstream decision in the waterfall.
-     * @returns `deny` for an unrevealed managed tool; otherwise passthrough.
+     * @returns `deny` for unrevealed tools with non-trivial parameters; lazily revealed for empty-parameter tools (no deny); otherwise passthrough.
      */
     private preExecute;
     /**
      * Check if a tool name should be exempt from the trim scheme.
      */
     private isExempt;
+    /**
+      * Check whether a tool's schema is effectively empty — no arguments needed.
+      */
+    private isTrivialParameters;
     /**
      * Capture the current full tool catalog from the registry.
      */

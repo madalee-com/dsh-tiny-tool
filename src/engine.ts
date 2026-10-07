@@ -125,18 +125,28 @@ export class TinyToolEngine {
 
   /**
    * `tools/pre-execute` waterfall: an unrevealed, non-exempt managed tool is
-   * hidden-until-called. Calling it registers the tool's full definition in the
-   * calling agent's scope (so the model sees its full parameters on the next
-   * assembly) and denies the call once so the host re-assembles and the model
-   * retries with arguments. Everything else passes through unchanged.
+   * hidden-until-called. Tools with trivial (empty `{}`) parameters are
+   * allowed through on first call and silently marked revealed — their full
+   * description then appears only on the next assemble. Non-trivial tools
+   * are registered in the calling agent's scope and denied once, triggering
+   * a host re-assemble so the model retries with arguments. Everything else
+   * passes through unchanged.
    * @param exec - the in-flight execution.
    * @param next - downstream decision in the waterfall.
-   * @returns `deny` for an unrevealed managed tool; otherwise passthrough.
+   * @returns `deny` for unrevealed tools with non-trivial parameters; lazily revealed for empty-parameter tools (no deny); otherwise passthrough.
    */
   private async preExecute(exec: ToolExecution, next: () => Promise<PreToolDecision>): Promise<PreToolDecision> {
     const name = (exec as unknown as ExecLike).name
     if (!this.catalog.has(name)) return next()
     if (this.revealed.has(name) || this.isExempt(name)) return next()
+    // Lazy-reveal: tools with trivial parameters are allowed through on first
+    // call (no deny/re-assemble), but still marked revealed so their full
+    // description appears on the next assemble.
+    const entry = this.catalog.get(name)
+    if (entry && this.isTrivialParameters(entry.parameters)) {
+      this.revealed.add(name)
+      return next()
+    }
     this.unhideAgentScoped(name, exec)
     return { kind: 'deny', reason: `${name} is now enabled with its full parameters; call it again with arguments.` }
   }
@@ -150,6 +160,16 @@ export class TinyToolEngine {
       if (name.startsWith(prefix)) return true
     }
     return false
+  }
+
+  /**
+    * Check whether a tool's schema is effectively empty — no arguments needed.
+    */
+  private isTrivialParameters(params: unknown): boolean {
+    if (params == null) return true
+    if (typeof params !== 'object') return false
+    const keys = Object.keys(params as Record<string, unknown>)
+    return keys.length === 0
   }
 
   /**

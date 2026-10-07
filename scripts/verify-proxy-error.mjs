@@ -118,4 +118,50 @@ const decisionRead = await listeners['tools/pre-execute'](
 assert(decisionRead.kind === 'allow', `"read" with keepTheBasics=true should pass pre-execute immediately (no deny/re-assemble), got ${decisionRead.kind}`)
 console.log('OK — keepTheBasics pre-populates revealed; basic tools bypass the trim scheme')
 
+// Lazy-reveal: tools with trivial {} parameters should be allowed through on
+// first call (no deny), silently added to revealed, full desc appears next assemble.
+const ctx4 = {
+  tools: {
+    schemas: () => [baseTool, { name: 'noop_tool', description: 'A no-op tool.', parameters: {} }],
+    get: (n) => n === baseTool.name ? baseTool : undefined,
+    register: () => () => {},
+  },
+  agents: { currentInitiator: () => undefined },
+  on: (e, h) => { listeners[e] = (...a) => h(...a) },
+}
+
+const engine4 = new TinyToolEngine(ctx4)
+// assemble populates the catalog; then preExecute sees it.
+await engine4.assemble({ tools: [baseTool] }, undefined, () => Promise.resolve({ tools: [baseTool] }))
+
+const decisionNoop = await listeners['tools/pre-execute'](
+  { name: 'noop_tool', agent: { ctx: { tools: agentToolsMock } } },
+  allowRead,
+)
+assert(decisionNoop.kind === 'allow', `noop_tool (empty params) should be allowed through on first call, got ${decisionNoop.kind}`)
+assert(engine4.revealed.has('noop_tool'), 'noop_tool should be silently added to revealed after lazy-reveal')
+
+// A second engine with non-trivial params should still deny.
+const ctx5 = {
+  tools: {
+    schemas: () => [baseTool, { name: 'named_tool', description: 'A tool with args.', parameters: { type: 'object', properties: { x: { type: 'string' } } } }],
+    get: (n) => n === baseTool.name ? baseTool : undefined,
+    register: () => () => {},
+  },
+  agents: { currentInitiator: () => undefined },
+  on: (e, h) => { listeners[e] = (...a) => h(...a) },
+}
+
+const engine5 = new TinyToolEngine(ctx5)
+await engine5.assemble({ tools: [baseTool] }, undefined, () => Promise.resolve({ tools: [baseTool] }))
+
+const decisionNamed = await listeners['tools/pre-execute'](
+  { name: 'named_tool', agent: { ctx: { tools: agentToolsMock } } },
+  allowRead,
+)
+assert(decisionNamed.kind === 'deny', `named_tool (non-empty params) should be denied on first call, got ${decisionNamed.kind}`)
+assert(engine5.revealed.has('named_tool'), 'named_tool should still be added to revealed even on deny')
+
+console.log('OK — lazy-reveal: trivial {} tools pass through; non-trivial tools still deny-on-first-call')
+
 process.exit(0)
