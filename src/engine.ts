@@ -15,6 +15,20 @@ import type { PreToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
 export type ToolSchema = { name: string; description: string; parameters: Record<string, unknown> }
 
 /** Render a tool result as plain text so the model can read it directly. */
+const KEEP_THE_BASICS_TOOLS = [
+  'bash',
+  'todo_write',
+  'ask_user_question',
+  'edit',
+  'write',
+  'read',
+  'present',
+  'skill',
+  'glob',
+  'grep',
+] as const
+
+/** Render a tool result as plain text so the model can read it directly. */
 function textRender(_args: unknown, value: unknown) {
   return [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value) }]
 }
@@ -34,6 +48,11 @@ export interface TinyToolConfig {
   exemptTools?: string[]
   /** Tool name prefixes to keep fully visible (e.g. ['mnemon_']). */
   exemptPrefixes?: string[]
+  /**
+   * Automatically exclude a set of basic tools from the trim scheme, keeping them
+   * fully visible under their real name with full parameters. Defaults to true.
+   */
+  keepTheBasics?: boolean
 }
 
 /**
@@ -69,6 +88,11 @@ export class TinyToolEngine {
     }
     if (config.exemptPrefixes) {
       for (const prefix of config.exemptPrefixes) this.exemptPrefixes.add(prefix)
+    }
+    // Pre-populate revealed so these basic tools are never trimmed.
+    const keepTheBasics = config.keepTheBasics !== false
+    if (keepTheBasics) {
+      for (const name of KEEP_THE_BASICS_TOOLS) this.revealed.add(name)
     }
     console.error(`[dsh-tiny-tool] apply() config received: ${JSON.stringify(config)}`)
     // Register the assemble hook explicitly.

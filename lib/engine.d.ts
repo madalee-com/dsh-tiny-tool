@@ -28,6 +28,11 @@ export interface TinyToolConfig {
     exemptTools?: string[];
     /** Tool name prefixes to keep fully visible (e.g. ['mnemon_']). */
     exemptPrefixes?: string[];
+    /**
+     * Automatically exclude a set of basic tools from the trim scheme, keeping them
+     * fully visible under their real name with full parameters. Defaults to true.
+     */
+    keepTheBasics?: boolean;
 }
 /**
  * The dsh-tiny-tool engine.

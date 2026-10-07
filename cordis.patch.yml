@@ -1,21 +1,18 @@
 # dsh-tiny-tool bundle patch: inserts the plugin row over the profile root.
 #
-# The plugin hides all tool/MCP descriptions from the system prompt, replacing
-# them with minimal stubs. Full schemas are kept in-memory and exposed through
-# two bridge tools (tool_search / tool_describe).
+# The plugin presents base tools under their real name with a trimmed
+# description and empty `{}` parameters, then reveals their full schema on
+# first call via the `tools/pre-execute` hook (agent-scoped register).
 
 - insert:
   - id: dsh-tiny-tool
     name: 'dsh-tiny-tool'
     config:
-      # On by default: non-exempt tools are sent with EMPTY parameters ({})
-      # instead of a trimmed/minified schema. Set to false to minify schemas
-      # (structure kept, descriptions stripped). Resolves via schema
-      # z.boolean().default(true) in src/index.ts:30 when unset.
-      emptyParameters: true
-      # Tool names to keep FULLY visible (do not hide their descriptions).
-      # Default: none — only the bridge tools are always exempt (src/engine.ts).
+      # Tool names to keep fully visible (do not trim descriptions).
       exemptTools: []
-      # Tool name prefixes to keep FULLY visible (e.g. ['mnemon_']).
-      # Default: none. Matches engine's `name.startsWith(prefix)` exemption.
+      # Tool name prefixes to keep fully visible (e.g. ['mnemon_']).
       exemptPrefixes: []
+      # Automatically exclude a set of basic tools from the trim scheme,
+      # keeping them fully visible under their real name with full parameters.
+      # Default: true. Set false to revert those tools to the trim scheme.
+      keepTheBasics: true
