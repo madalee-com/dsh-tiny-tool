@@ -130,14 +130,18 @@ export class TinyToolEngine {
         // Iterate all store entries and find the AgentLoop impl by name.
         // Store is a plain object (cordis uses Reflect.ownKeys + bracket access), not a Map.
         let rawAgentLoop: unknown
+        let foundNames: string[] = []
         for (const key of Object.getOwnPropertySymbols(store)) {
           const impl = store[key]
-          if ((impl as any)?.name === 'agentLoop') {
+          const name = (impl as any)?.name
+          if (name) foundNames.push(name)
+          if (name === 'agentLoop') {
             rawAgentLoop = (impl as any).value
             break
           }
         }
 
+        console.log('[tiny-tool] store has', Object.getOwnPropertySymbols(store).length, 'symbol entries, names:', JSON.stringify(foundNames))
         if (!rawAgentLoop) return false
 
         // Unwrap the traceable proxy to get the raw AgentLoop instance.
@@ -169,15 +173,16 @@ export class TinyToolEngine {
     // Defer: AgentLoop may not be in the store yet. Retry on lifecycle events.
     let scheduled = false
     const scheduleRetry = () => {
-      if (patched || scheduled) return
+      if (patched) return
+      console.log('[tiny-tool] retrying agentLoop patch')
       scheduled = true
       queueMicrotask(() => {
         scheduled = false
         attempt()
       })
     }
-    ctx.on('internal/plugin', scheduleRetry, { global: true })
-    ctx.on('internal/status', scheduleRetry, { global: true })
+    ctx.on('internal/plugin', (event: any) => scheduleRetry(), { global: true })
+    ctx.on('internal/status', (event: any) => scheduleRetry(), { global: true })
     console.log('[tiny-tool] agentLoop not available at construction; deferring patch via lifecycle events')
   }
 
