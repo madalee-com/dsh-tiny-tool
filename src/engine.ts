@@ -124,13 +124,14 @@ export class TinyToolEngine {
 
     const attempt = (): boolean => {
       try {
-        const store = (ctx.reflect as any)?.store as Map<symbol, unknown> | undefined
+        const store = (ctx.reflect as any)?.store as Record<PropertyKey, unknown> | undefined
         if (!store) return false
 
         // Iterate all store entries and find the AgentLoop impl by name.
+        // Store is a plain object (cordis uses Reflect.ownKeys + bracket access), not a Map.
         let rawAgentLoop: unknown
         for (const key of Object.getOwnPropertySymbols(store)) {
-          const impl = store.get(key)
+          const impl = store[key]
           if ((impl as any)?.name === 'agentLoop') {
             rawAgentLoop = (impl as any).value
             break
