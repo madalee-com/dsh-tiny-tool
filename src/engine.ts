@@ -142,11 +142,20 @@ export class TinyToolEngine {
         }
 
         console.log('[tiny-tool] store has', Object.getOwnPropertySymbols(store).length, 'symbol entries, names:', JSON.stringify(foundNames))
-        if (!rawAgentLoop) return false
+        if (!rawAgentLoop) {
+          console.log('[tiny-tool] agentLoop impl found but no .value; bailing')
+          return false
+        }
+        console.log('[tiny-tool] rawAgentLoop type:', typeof rawAgentLoop, 'has original symbol:', symbols.original in (rawAgentLoop as any))
 
         // Unwrap the traceable proxy to get the raw AgentLoop instance.
-        const target = ((rawAgentLoop as any)?.[symbols.original] ?? rawAgentLoop) as { buildRequest?: (...args: unknown[]) => unknown }
-        if (!target?.buildRequest) return false
+        const unwrapped = (rawAgentLoop as any)?.[symbols.original]
+        console.log('[tiny-tool] unwrapped via symbols.original:', !!unwrapped, 'type:', typeof unwrapped)
+        const target = (unwrapped ?? rawAgentLoop) as { buildRequest?: (...args: unknown[]) => unknown }
+        if (!target?.buildRequest) {
+          console.log('[tiny-tool] target has no buildRequest; keys:', Object.keys(target || {}).slice(0, 10))
+          return false
+        }
 
         // Save the original and replace with the trimmed wrapper.
         this.originalBuildRequest = target.buildRequest as (...args: [unknown, unknown, ToolSchema[], ...unknown[]]) => Promise<unknown>
