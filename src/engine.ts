@@ -116,21 +116,26 @@ export class TinyToolEngine {
   private patchBuildRequest(ctx: Context): void {
     try {
       const agentLoop = (ctx as unknown as { agentLoop?: unknown }).agentLoop
+      console.log(`[tiny-tool] ctx.agentLoop present: ${!!agentLoop}`)
       if (!agentLoop) return
       // Access the raw AgentLoop instance via the traceable proxy's original symbol.
       const rawAgentLoop = (agentLoop as { [symbols.original]?: unknown })?.[symbols.original] as { buildRequest?: (...args: unknown[]) => unknown } | undefined
+      console.log(`[tiny-tool] rawAgentLoop present: ${!!rawAgentLoop}, has buildRequest: ${!!rawAgentLoop?.buildRequest}`)
       if (!rawAgentLoop?.buildRequest) return
       this.originalBuildRequest = rawAgentLoop.buildRequest as (config: unknown, preparedCall: unknown, tools: ToolSchema[], position: unknown, startsRequestSeries: unknown, signal: unknown) => Promise<unknown>
       // Replace with the trimmed wrapper.
       rawAgentLoop.buildRequest = async (...args: unknown[]) => {
         const [config, preparedCall, tools, ...rest] = args as [unknown, unknown, ToolSchema[], ...unknown[]]
+        console.log(`[tiny-tool] buildRequest called with ${Array.isArray(tools) ? tools.length : 'non-array'} tools`)
         if (Array.isArray(tools)) {
           const trimmed = this.trimTools(tools)
+          console.log(`[tiny-tool] trimming complete: ${trimmed.length} tools sent to model`)
           return (this.originalBuildRequest as (...a: unknown[]) => unknown).call(rawAgentLoop, config, preparedCall, trimmed, ...rest)
         }
         return (this.originalBuildRequest as (...a: unknown[]) => unknown).call(rawAgentLoop, config, preparedCall, tools, ...rest)
       }
-    } catch {
+    } catch (e) {
+      console.error(`[tiny-tool] patchBuildRequest failed:`, e)
       // Non-fatal: if interception fails the plugin still works via pre-execute deny.
     }
   }
