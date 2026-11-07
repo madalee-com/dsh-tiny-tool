@@ -152,6 +152,18 @@ export class TinyToolEngine {
         const unwrapped = (rawAgentLoop as any)?.[symbols.original]
         console.log('[tiny-tool] unwrapped via symbols.original:', !!unwrapped, 'type:', typeof unwrapped)
         const target = (unwrapped ?? rawAgentLoop) as { buildRequest?: (...args: unknown[]) => unknown }
+
+        // Deeper inspection: check constructor and prototype chain
+        if (!target) {
+          console.log('[tiny-tool] target is falsy; bailing')
+          return false
+        }
+        const proto = Object.getPrototypeOf(target)
+        const protoName = proto?.constructor?.name ?? 'null'
+        console.log('[tiny-tool] target constructor:', (target as any).constructor?.name, 'proto constructor:', protoName)
+        console.log('[tiny-tool] target.buildRequest type:', typeof (target as any).buildRequest)
+        console.log('[tiny-tool] proto has buildRequest:', proto && typeof proto.buildRequest === 'function')
+
         if (!target?.buildRequest) {
           console.log('[tiny-tool] target has no buildRequest; keys:', Object.keys(target || {}).slice(0, 10))
           return false
