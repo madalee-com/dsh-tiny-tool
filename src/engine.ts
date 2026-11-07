@@ -8,7 +8,7 @@
  * @module dsh-tiny-tool/engine
  */
 
-import { Context } from '@deepseek-ai/cordis'
+import { Context, symbols } from '@deepseek-ai/cordis'
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import type { PreToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
 
@@ -80,6 +80,8 @@ export class TinyToolEngine {
   private readonly exemptPrefixes = new Set<string>()
   /** Base tool names whose full schema has been revealed to the model this session. */
   private readonly revealed = new Set<string>()
+  /** Original AgentLoop.buildRequest, saved for restoration if needed. */
+  private originalBuildRequest?: (config: unknown, preparedCall: unknown, tools: ToolSchema[], position: unknown, startsRequestSeries: unknown, signal: unknown) => Promise<unknown>
 
   constructor(ctx: Context, config: TinyToolConfig = {}) {
     this.ctx = ctx
@@ -99,6 +101,58 @@ export class TinyToolEngine {
     // Reveal-on-execute: intercept calls to unrevealed, managed tools so the
     // tool's full definition can be registered in the calling agent's scope.
     ctx.on('tools/pre-execute', this.preExecute.bind(this))
+    // Intercept buildRequest at the last point before tools reach the model.
+    // The traceable proxy's set trap forwards to the raw AgentLoop instance,
+    // so patching ctx.agentLoop.buildRequest overrides the internal call.
+    this.patchBuildRequest(ctx)
+  }
+
+  /**
+   * Monkey-patch `ctx.agentLoop.buildRequest` to trim tool schemas before they
+   * reach the model. Uses the cordis traceable-proxy mechanism: setting a
+   * property on the proxy forwards to the raw underlying instance, and internal
+   * `this.buildRequest(...)` calls use that same raw instance.
+   */
+  private patchBuildRequest(ctx: Context): void {
+    try {
+      const agentLoop = (ctx as unknown as { agentLoop?: unknown }).agentLoop
+      if (!agentLoop) return
+      // Access the raw AgentLoop instance via the traceable proxy's original symbol.
+      const rawAgentLoop = (agentLoop as { [symbols.original]?: unknown })?.[symbols.original] as { buildRequest?: (...args: unknown[]) => unknown } | undefined
+      if (!rawAgentLoop?.buildRequest) return
+      this.originalBuildRequest = rawAgentLoop.buildRequest as (config: unknown, preparedCall: unknown, tools: ToolSchema[], position: unknown, startsRequestSeries: unknown, signal: unknown) => Promise<unknown>
+      // Replace with the trimmed wrapper.
+      rawAgentLoop.buildRequest = async (...args: unknown[]) => {
+        const [config, preparedCall, tools, ...rest] = args as [unknown, unknown, ToolSchema[], ...unknown[]]
+        if (Array.isArray(tools)) {
+          const trimmed = this.trimTools(tools)
+          return (this.originalBuildRequest as (...a: unknown[]) => unknown).call(rawAgentLoop, config, preparedCall, trimmed, ...rest)
+        }
+        return (this.originalBuildRequest as (...a: unknown[]) => unknown).call(rawAgentLoop, config, preparedCall, tools, ...rest)
+      }
+    } catch {
+      // Non-fatal: if interception fails the plugin still works via pre-execute deny.
+    }
+  }
+
+  /**
+   * Return a trimmed copy of the tool schemas: revealed/exempt tools keep their
+   * full schema, everything else becomes a stub (first-sentence description +
+   * empty parameters) so the model cannot see implementation details.
+   */
+  private trimTools(tools: ToolSchema[]): ToolSchema[] {
+    this.snapshotCatalog()
+    return tools.map(tool => {
+      const entry = this.catalog.get(tool.name)
+      if (!entry) {
+        // Unknown tool: trim to first sentence to avoid leaking any metadata.
+        return { name: tool.name, description: extractFirstSentence(tool.description ?? ''), parameters: {} }
+      }
+      if (this.revealed.has(entry.name) || this.isExempt(entry.name)) {
+        return { name: entry.name, description: entry.description, parameters: entry.parameters as Record<string, unknown> }
+      }
+      return { name: entry.name, description: extractFirstSentence(entry.description), parameters: {} }
+    })
   }
 
   /**

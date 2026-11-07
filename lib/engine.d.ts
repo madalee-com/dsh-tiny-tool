@@ -44,7 +44,22 @@ export declare class TinyToolEngine {
     private readonly exemptPrefixes;
     /** Base tool names whose full schema has been revealed to the model this session. */
     private readonly revealed;
+    /** Original AgentLoop.buildRequest, saved for restoration if needed. */
+    private originalBuildRequest?;
     constructor(ctx: Context, config?: TinyToolConfig);
+    /**
+     * Monkey-patch `ctx.agentLoop.buildRequest` to trim tool schemas before they
+     * reach the model. Uses the cordis traceable-proxy mechanism: setting a
+     * property on the proxy forwards to the raw underlying instance, and internal
+     * `this.buildRequest(...)` calls use that same raw instance.
+     */
+    private patchBuildRequest;
+    /**
+     * Return a trimmed copy of the tool schemas: revealed/exempt tools keep their
+     * full schema, everything else becomes a stub (first-sentence description +
+     * empty parameters) so the model cannot see implementation details.
+     */
+    private trimTools;
     /**
      * Reveal a base tool's full schema to exactly the calling agent by registering
      * its full definition in that agent's scope, then mark it revealed for the
