@@ -182,19 +182,82 @@ export class TinyToolEngine {
 
   /**
    * Capture the current full tool catalog from the registry.
+   *
+   * Tries multiple fallback strategies because `ctx.tools.schemas()` may throw
+   * or return an empty array when accessed from the plugin's child fiber
+   * context (harness cordis/dsh-* version drift).
    */
   private snapshotCatalog(): void {
-    const schemas = this.ctx.tools.schemas(undefined)
-    for (const schema of schemas) {
-      // Skip any residual proxy stubs — they are emitted from their base tool,
-      // never stored as catalog entries, so they can't re-nest on a later
-      // assembly.
-      if (schema.name.startsWith('use_')) continue
-      this.catalog.set(schema.name, {
-        name: schema.name,
-        description: schema.description ?? '',
-        parameters: schema.parameters ?? {},
-      })
+    const toolsAny = this.ctx.tools as any
+    const sources: Array<{ label: string; schemas: ToolSchema[] }> = []
+
+    // Strategy 1: the documented public API.
+    try {
+      const schemas = toolsAny.schemas(undefined)
+      if (Array.isArray(schemas)) sources.push({ label: 'schemas()', schemas })
+    } catch (e) {
+      console.error('[tiny-tool] ctx.tools.schemas() threw:', (e as Error).message)
+    }
+
+    // Strategy 2: definitions() returns the raw tool definition objects.
+    if (sources.length === 0 && typeof toolsAny.definitions === 'function') {
+      try {
+        const defs = toolsAny.definitions(undefined)
+        if (Array.isArray(defs)) {
+          sources.push({
+            label: 'definitions()',
+            schemas: defs.map((d: any) => ({
+              name: d.name ?? d.output?.name,
+              description: d.description ?? d.output?.description,
+              parameters: d.parameters ?? d.output?.parameters ?? {},
+            })),
+          })
+        }
+      } catch (e) {
+        console.error('[tiny-tool] ctx.tools.definitions() threw:', (e as Error).message)
+      }
+    }
+
+    // Strategy 3: view().visible is a Map<name, definition>.
+    if (sources.length === 0 && typeof toolsAny.view === 'function') {
+      try {
+        const view = toolsAny.view(undefined)
+        if (view && view.visible instanceof Map) {
+          sources.push({
+            label: 'view().visible',
+            schemas: Array.from(view.visible.values()).map((d: any) => ({
+              name: d.name ?? d.output?.name,
+              description: d.description ?? d.output?.description,
+              parameters: d.parameters ?? d.output?.parameters ?? {},
+            })),
+          })
+        }
+      } catch (e) {
+        console.error('[tiny-tool] ctx.tools.view() threw:', (e as Error).message)
+      }
+    }
+
+    let count = 0
+    for (const source of sources) {
+      for (const schema of source.schemas) {
+        if (schema.name.startsWith('use_')) continue
+        this.catalog.set(schema.name, {
+          name: schema.name,
+          description: schema.description ?? '',
+          parameters: schema.parameters ?? {},
+        })
+        count++
+      }
+    }
+
+    if (count === 0) {
+      const methods = Object.getOwnPropertyNames(toolsAny).filter(n => typeof (toolsAny as any)[n] === 'function')
+      console.error(
+        `[tiny-tool] WARNING: catalog empty after all fallback strategies. ` +
+        `ctx.tools available methods: ${methods.length ? methods.join(', ') : '(none found — ctx.tools may be inaccessible from this fiber)'}`
+      )
+    } else {
+      console.error(`[tiny-tool] catalog populated via ${sources.map(s => s.label).join(' + ')}: ${count} tools`)
     }
   }
 

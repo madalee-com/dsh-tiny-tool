@@ -79,6 +79,10 @@ export declare class TinyToolEngine {
     private isTrivialParameters;
     /**
      * Capture the current full tool catalog from the registry.
+     *
+     * Tries multiple fallback strategies because `ctx.tools.schemas()` may throw
+     * or return an empty array when accessed from the plugin's child fiber
+     * context (harness cordis/dsh-* version drift).
      */
     private snapshotCatalog;
     /**
