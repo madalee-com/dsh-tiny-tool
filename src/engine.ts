@@ -81,7 +81,7 @@ export class TinyToolEngine {
   /** Base tool names whose full schema has been revealed to the model this session. */
   private readonly revealed = new Set<string>()
   /** Original AgentLoop.buildRequest, saved for restoration if needed. */
-  private originalBuildRequest?: (config: unknown, preparedCall: unknown, tools: ToolSchema[], position: unknown, startsRequestSeries: unknown, signal: unknown) => Promise<unknown>
+  private originalBuildRequest?: (...args: [unknown, unknown, ToolSchema[], ...unknown[]]) => Promise<unknown>
 
   constructor(ctx: Context, config: TinyToolConfig = {}) {
     this.ctx = ctx
@@ -108,36 +108,76 @@ export class TinyToolEngine {
   }
 
   /**
-   * Monkey-patch `ctx.agentLoop.buildRequest` to trim tool schemas before they
+   * Monkey-patch `AgentLoop.buildRequest` to trim tool schemas before they
    * reach the model. Uses the cordis traceable-proxy mechanism: setting a
    * property on the proxy forwards to the raw underlying instance, and internal
    * `this.buildRequest(...)` calls use that same raw instance.
+   *
+   * Accesses AgentLoop via store iteration (not `ctx.agentLoop`) because the
+   * service may be provided by a sibling fiber with a different isolate key;
+   * direct property access throws "cannot get property agentLoop without inject".
+   * Defers patching via cordis lifecycle events if AgentLoop is not yet in the
+   * store at construction time.
    */
   private patchBuildRequest(ctx: Context): void {
-    try {
-      const agentLoop = (ctx as unknown as { agentLoop?: unknown }).agentLoop
-      console.log(`[tiny-tool] ctx.agentLoop present: ${!!agentLoop}`)
-      if (!agentLoop) return
-      // Access the raw AgentLoop instance via the traceable proxy's original symbol.
-      const rawAgentLoop = (agentLoop as { [symbols.original]?: unknown })?.[symbols.original] as { buildRequest?: (...args: unknown[]) => unknown } | undefined
-      console.log(`[tiny-tool] rawAgentLoop present: ${!!rawAgentLoop}, has buildRequest: ${!!rawAgentLoop?.buildRequest}`)
-      if (!rawAgentLoop?.buildRequest) return
-      this.originalBuildRequest = rawAgentLoop.buildRequest as (config: unknown, preparedCall: unknown, tools: ToolSchema[], position: unknown, startsRequestSeries: unknown, signal: unknown) => Promise<unknown>
-      // Replace with the trimmed wrapper.
-      rawAgentLoop.buildRequest = async (...args: unknown[]) => {
-        const [config, preparedCall, tools, ...rest] = args as [unknown, unknown, ToolSchema[], ...unknown[]]
-        console.log(`[tiny-tool] buildRequest called with ${Array.isArray(tools) ? tools.length : 'non-array'} tools`)
-        if (Array.isArray(tools)) {
-          const trimmed = this.trimTools(tools)
-          console.log(`[tiny-tool] trimming complete: ${trimmed.length} tools sent to model`)
-          return (this.originalBuildRequest as (...a: unknown[]) => unknown).call(rawAgentLoop, config, preparedCall, trimmed, ...rest)
+    let patched = false
+
+    const attempt = (): boolean => {
+      try {
+        const store = (ctx.reflect as any)?.store as Map<symbol, unknown> | undefined
+        if (!store) return false
+
+        // Iterate all store entries and find the AgentLoop impl by name.
+        let rawAgentLoop: unknown
+        for (const key of Object.getOwnPropertySymbols(store)) {
+          const impl = store.get(key)
+          if ((impl as any)?.name === 'agentLoop') {
+            rawAgentLoop = (impl as any).value
+            break
+          }
         }
-        return (this.originalBuildRequest as (...a: unknown[]) => unknown).call(rawAgentLoop, config, preparedCall, tools, ...rest)
+
+        if (!rawAgentLoop) return false
+
+        // Unwrap the traceable proxy to get the raw AgentLoop instance.
+        const target = ((rawAgentLoop as any)?.[symbols.original] ?? rawAgentLoop) as { buildRequest?: (...args: unknown[]) => unknown }
+        if (!target?.buildRequest) return false
+
+        // Save the original and replace with the trimmed wrapper.
+        this.originalBuildRequest = target.buildRequest as (...args: [unknown, unknown, ToolSchema[], ...unknown[]]) => Promise<unknown>
+        target.buildRequest = async (...args: unknown[]) => {
+          const [config, preparedCall, tools, ...rest] = args as [unknown, unknown, ToolSchema[], ...unknown[]]
+          if (Array.isArray(tools)) {
+            const trimmed = this.trimTools(tools)
+            return this.originalBuildRequest!(config, preparedCall, trimmed, ...rest)
+          }
+          return this.originalBuildRequest!(config, preparedCall, tools, ...rest)
+        }
+
+        patched = true
+        console.log('[tiny-tool] agentLoop.buildRequest patched successfully')
+        return true
+      } catch (e) {
+        console.error('[tiny-tool] patchBuildRequest attempt failed:', (e as Error).message)
+        return false
       }
-    } catch (e) {
-      console.error(`[tiny-tool] patchBuildRequest failed:`, e)
-      // Non-fatal: if interception fails the plugin still works via pre-execute deny.
     }
+
+    if (attempt()) return
+
+    // Defer: AgentLoop may not be in the store yet. Retry on lifecycle events.
+    let scheduled = false
+    const scheduleRetry = () => {
+      if (patched || scheduled) return
+      scheduled = true
+      queueMicrotask(() => {
+        scheduled = false
+        attempt()
+      })
+    }
+    ctx.on('internal/plugin', scheduleRetry, { global: true })
+    ctx.on('internal/status', scheduleRetry, { global: true })
+    console.log('[tiny-tool] agentLoop not available at construction; deferring patch via lifecycle events')
   }
 
   /**
