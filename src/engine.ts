@@ -123,7 +123,7 @@ export class TinyToolEngine {
 
     const attempt = (): boolean => {
       try {
-        const agents = (ctx as any).agents as { enter?: (...args: unknown[]) => unknown; list?: () => unknown[] } | undefined
+        const agents = ctx.get('agents') as { enter?: (...args: unknown[]) => unknown; list?: () => unknown[] } | undefined
         if (!agents) return false
 
         // Patch existing live agents first.
