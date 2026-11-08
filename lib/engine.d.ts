@@ -60,10 +60,12 @@ export declare class TinyToolEngine {
      */
     private patchBuildRequest;
     /**
-     * Patch a ReactLoopAgent's buildRequest method to trim tool schemas before
-     * they reach the model. Guards against double-patching with a marker property.
+     * Patch a ReactLoopAgent's step method to trim tool schemas in decision.assembly.tools
+     * BEFORE prepareRequest finalizes the config. This avoids the "config changed before
+     * adapter dispatch" error that occurs when tools are modified after config preparation.
+     * Guards against double-patching with a marker property.
      */
-    private patchAgentBuildRequest;
+    private patchAgentStep;
     /**
      * Return a trimmed copy of the tool schemas: revealed/exempt tools keep their
      * full schema, everything else becomes a stub (first-sentence description +

@@ -129,7 +129,7 @@ export class TinyToolEngine {
         // Patch existing live agents first.
         if (Array.isArray(agents.list)) {
           for (const agent of agents.list()) {
-            this.patchAgentBuildRequest(agent)
+            this.patchAgentStep(agent)
           }
         }
 
@@ -137,11 +137,11 @@ export class TinyToolEngine {
         const originalEnter = agents.enter as ((agent: unknown, owner?: unknown) => unknown) | undefined
         if (originalEnter) {
           (agents as any).enter = (agent: unknown, owner?: unknown): unknown => {
-            this.patchAgentBuildRequest(agent)
+            this.patchAgentStep(agent)
             return originalEnter.call(agents, agent, owner)
           }
           patched = true
-          console.log('[tiny-tool] agents.enter patched for ReactLoopAgent.buildRequest')
+          console.log('[tiny-tool] agents.enter patched for ReactLoopAgent.step')
         }
 
         if (!patched) {
@@ -173,19 +173,27 @@ export class TinyToolEngine {
   }
 
   /**
-   * Patch a ReactLoopAgent's buildRequest method to trim tool schemas before
-   * they reach the model. Guards against double-patching with a marker property.
+   * Patch a ReactLoopAgent's step method to trim tool schemas in decision.assembly.tools
+   * BEFORE prepareRequest finalizes the config. This avoids the "config changed before
+   * adapter dispatch" error that occurs when tools are modified after config preparation.
+   * Guards against double-patching with a marker property.
    */
-  private patchAgentBuildRequest(agent: unknown): void {
-    if (!agent || typeof (agent as any).buildRequest !== 'function') return
+  private patchAgentStep(agent: unknown): void {
+    if (!agent || typeof (agent as any).step !== 'function') return
     if ((agent as any).__tinyToolPatched) return
-    const target = agent as { buildRequest: (...args: unknown[]) => Promise<unknown>; __tinyToolPatched?: boolean }
-    const original = target.buildRequest.bind(target)
+    const target = agent as { step: (decision: unknown) => Promise<unknown>; __tinyToolPatched?: boolean }
+    const original = target.step.bind(target)
     target.__tinyToolPatched = true
-    target.buildRequest = async (...args: unknown[]): Promise<unknown> => {
-      const [config, preparedCall, tools] = args as [unknown, unknown, ToolSchema[]]
-      const trimmedTools = this.trimTools(tools)
-      return original(config, preparedCall, trimmedTools, ...args.slice(3))
+    target.step = async (decision: unknown): Promise<unknown> => {
+      // Trim tools in decision.assembly BEFORE prepareRequest uses them, so both
+      // the prepared config and the request have matching (trimmed) tool schemas.
+      if (decision && typeof decision === 'object') {
+        const assembly = (decision as any).assembly
+        if (assembly && Array.isArray(assembly.tools)) {
+          assembly.tools = this.trimTools(assembly.tools)
+        }
+      }
+      return original(decision)
     }
   }
 

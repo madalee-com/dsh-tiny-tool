@@ -1,6 +1,6 @@
 {
   "name": "dsh-tiny-tool",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Hide all tool/MCP descriptions from the system prompt; expose them on demand via tool_describe",
   "type": "module",
   "main": "lib/index.js",
