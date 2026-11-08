@@ -48,18 +48,22 @@ export declare class TinyToolEngine {
     private originalBuildRequest?;
     constructor(ctx: Context, config?: TinyToolConfig);
     /**
-     * Monkey-patch `AgentLoop.buildRequest` to trim tool schemas before they
-     * reach the model. Uses the cordis traceable-proxy mechanism: setting a
-     * property on the proxy forwards to the raw underlying instance, and internal
-     * `this.buildRequest(...)` calls use that same raw instance.
+     * Monkey-patch `ReactLoopAgent.buildRequest` to trim tool schemas before they
+     * reach the model. Agents are tracked in the `ctx.agents` registry; new agents
+     * enter via `agents.enter(agent, owner)`, and existing agents are retrievable
+     * via `agents.list()`. We patch each ReactLoopAgent's buildRequest when it is
+     * entered, and also patch any already-live agents.
      *
-     * Accesses AgentLoop via store iteration (not `ctx.agentLoop`) because the
-     * service may be provided by a sibling fiber with a different isolate key;
-     * direct property access throws "cannot get property agentLoop without inject".
-     * Defers patching via cordis lifecycle events if AgentLoop is not yet in the
-     * store at construction time.
+     * The traceable proxy's set trap forwards property assignments to the raw
+     * AgentRegistry instance, so patching `ctx.agents.enter` overrides the
+     * internal creation path used by AgentLoop.initializeAgent.
      */
     private patchBuildRequest;
+    /**
+     * Patch a ReactLoopAgent's buildRequest method to trim tool schemas before
+     * they reach the model. Guards against double-patching with a marker property.
+     */
+    private patchAgentBuildRequest;
     /**
      * Return a trimmed copy of the tool schemas: revealed/exempt tools keep their
      * full schema, everything else becomes a stub (first-sentence description +

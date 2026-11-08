@@ -108,81 +108,46 @@ export class TinyToolEngine {
   }
 
   /**
-   * Monkey-patch `AgentLoop.buildRequest` to trim tool schemas before they
-   * reach the model. Uses the cordis traceable-proxy mechanism: setting a
-   * property on the proxy forwards to the raw underlying instance, and internal
-   * `this.buildRequest(...)` calls use that same raw instance.
+   * Monkey-patch `ReactLoopAgent.buildRequest` to trim tool schemas before they
+   * reach the model. Agents are tracked in the `ctx.agents` registry; new agents
+   * enter via `agents.enter(agent, owner)`, and existing agents are retrievable
+   * via `agents.list()`. We patch each ReactLoopAgent's buildRequest when it is
+   * entered, and also patch any already-live agents.
    *
-   * Accesses AgentLoop via store iteration (not `ctx.agentLoop`) because the
-   * service may be provided by a sibling fiber with a different isolate key;
-   * direct property access throws "cannot get property agentLoop without inject".
-   * Defers patching via cordis lifecycle events if AgentLoop is not yet in the
-   * store at construction time.
+   * The traceable proxy's set trap forwards property assignments to the raw
+   * AgentRegistry instance, so patching `ctx.agents.enter` overrides the
+   * internal creation path used by AgentLoop.initializeAgent.
    */
   private patchBuildRequest(ctx: Context): void {
     let patched = false
 
     const attempt = (): boolean => {
       try {
-        const store = (ctx.reflect as any)?.store as Record<PropertyKey, unknown> | undefined
-        if (!store) return false
+        const agents = (ctx as any).agents as { enter?: (...args: unknown[]) => unknown; list?: () => unknown[] } | undefined
+        if (!agents) return false
 
-        // Iterate all store entries and find the AgentLoop impl by name.
-        // Store is a plain object (cordis uses Reflect.ownKeys + bracket access), not a Map.
-        let rawAgentLoop: unknown
-        let foundNames: string[] = []
-        for (const key of Object.getOwnPropertySymbols(store)) {
-          const impl = store[key]
-          const name = (impl as any)?.name
-          if (name) foundNames.push(name)
-          if (name === 'agentLoop') {
-            rawAgentLoop = (impl as any).value
-            break
+        // Patch existing live agents first.
+        if (Array.isArray(agents.list)) {
+          for (const agent of agents.list()) {
+            this.patchAgentBuildRequest(agent)
           }
         }
 
-        console.log('[tiny-tool] store has', Object.getOwnPropertySymbols(store).length, 'symbol entries, names:', JSON.stringify(foundNames))
-        if (!rawAgentLoop) {
-          console.log('[tiny-tool] agentLoop impl found but no .value; bailing')
-          return false
-        }
-        console.log('[tiny-tool] rawAgentLoop type:', typeof rawAgentLoop, 'has original symbol:', symbols.original in (rawAgentLoop as any))
-
-        // Unwrap the traceable proxy to get the raw AgentLoop instance.
-        const unwrapped = (rawAgentLoop as any)?.[symbols.original]
-        console.log('[tiny-tool] unwrapped via symbols.original:', !!unwrapped, 'type:', typeof unwrapped)
-        const target = (unwrapped ?? rawAgentLoop) as { buildRequest?: (...args: unknown[]) => unknown }
-
-        // Deeper inspection: check constructor and prototype chain
-        if (!target) {
-          console.log('[tiny-tool] target is falsy; bailing')
-          return false
-        }
-        const proto = Object.getPrototypeOf(target)
-        const protoName = proto?.constructor?.name ?? 'null'
-        console.log('[tiny-tool] target constructor:', (target as any).constructor?.name, 'proto constructor:', protoName)
-        console.log('[tiny-tool] target.buildRequest type:', typeof (target as any).buildRequest)
-        console.log('[tiny-tool] proto has buildRequest:', proto && typeof proto.buildRequest === 'function')
-
-        if (!target?.buildRequest) {
-          console.log('[tiny-tool] target has no buildRequest; keys:', Object.keys(target || {}).slice(0, 10))
-          return false
-        }
-
-        // Save the original and replace with the trimmed wrapper.
-        this.originalBuildRequest = target.buildRequest as (...args: [unknown, unknown, ToolSchema[], ...unknown[]]) => Promise<unknown>
-        target.buildRequest = async (...args: unknown[]) => {
-          const [config, preparedCall, tools, ...rest] = args as [unknown, unknown, ToolSchema[], ...unknown[]]
-          if (Array.isArray(tools)) {
-            const trimmed = this.trimTools(tools)
-            return this.originalBuildRequest!(config, preparedCall, trimmed, ...rest)
+        // Intercept new agent creation to patch each ReactLoopAgent on entry.
+        const originalEnter = agents.enter as ((agent: unknown, owner?: unknown) => unknown) | undefined
+        if (originalEnter) {
+          (agents as any).enter = (agent: unknown, owner?: unknown): unknown => {
+            this.patchAgentBuildRequest(agent)
+            return originalEnter.call(agents, agent, owner)
           }
-          return this.originalBuildRequest!(config, preparedCall, tools, ...rest)
+          patched = true
+          console.log('[tiny-tool] agents.enter patched for ReactLoopAgent.buildRequest')
         }
 
-        patched = true
-        console.log('[tiny-tool] agentLoop.buildRequest patched successfully')
-        return true
+        if (!patched) {
+          console.log('[tiny-tool] agents service available but enter not found; bailing')
+        }
+        return patched
       } catch (e) {
         console.error('[tiny-tool] patchBuildRequest attempt failed:', (e as Error).message)
         return false
@@ -191,11 +156,11 @@ export class TinyToolEngine {
 
     if (attempt()) return
 
-    // Defer: AgentLoop may not be in the store yet. Retry on lifecycle events.
+    // Defer: agents service may not be available yet. Retry on lifecycle events.
     let scheduled = false
     const scheduleRetry = () => {
       if (patched) return
-      console.log('[tiny-tool] retrying agentLoop patch')
+      console.log('[tiny-tool] retrying agent enter patch')
       scheduled = true
       queueMicrotask(() => {
         scheduled = false
@@ -204,8 +169,26 @@ export class TinyToolEngine {
     }
     ctx.on('internal/plugin', (event: any) => scheduleRetry(), { global: true })
     ctx.on('internal/status', (event: any) => scheduleRetry(), { global: true })
-    console.log('[tiny-tool] agentLoop not available at construction; deferring patch via lifecycle events')
+    console.log('[tiny-tool] agents service not available at construction; deferring patch via lifecycle events')
   }
+
+  /**
+   * Patch a ReactLoopAgent's buildRequest method to trim tool schemas before
+   * they reach the model. Guards against double-patching with a marker property.
+   */
+  private patchAgentBuildRequest(agent: unknown): void {
+    if (!agent || typeof (agent as any).buildRequest !== 'function') return
+    if ((agent as any).__tinyToolPatched) return
+    const target = agent as { buildRequest: (...args: unknown[]) => Promise<unknown>; __tinyToolPatched?: boolean }
+    const original = target.buildRequest
+    target.__tinyToolPatched = true
+    target.buildRequest = async (...args: unknown[]): Promise<unknown> => {
+      const [config, preparedCall, tools] = args as [unknown, unknown, ToolSchema[]]
+      const trimmedTools = this.trimTools(tools)
+      return original(config, preparedCall, trimmedTools, ...args.slice(3))
+    }
+  }
+
 
   /**
    * Return a trimmed copy of the tool schemas: revealed/exempt tools keep their
