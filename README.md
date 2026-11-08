@@ -17,7 +17,7 @@ The model can still call tools through the normal mechanism — it just won't se
 ### Via dsh plugin install
 
 ```bash
-dsh plugin install --profile web github:madalee-com/dsh-tiny-tool
+dsh plugin --profile web install github:madalee-com/dsh-tiny-tool
 ```
 
 ### Manual installation
