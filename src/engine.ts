@@ -141,15 +141,9 @@ export class TinyToolEngine {
             return originalEnter.call(agents, agent, owner)
           }
           patched = true
-          console.log('[tiny-tool] agents.enter patched for ReactLoopAgent.step')
-        }
-
-        if (!patched) {
-          console.log('[tiny-tool] agents service available but enter not found; bailing')
         }
         return patched
-      } catch (e) {
-        console.error('[tiny-tool] patchBuildRequest attempt failed:', (e as Error).message)
+      } catch {
         return false
       }
     }
@@ -160,7 +154,6 @@ export class TinyToolEngine {
     let scheduled = false
     const scheduleRetry = () => {
       if (patched) return
-      console.log('[tiny-tool] retrying agent enter patch')
       scheduled = true
       queueMicrotask(() => {
         scheduled = false
@@ -169,7 +162,6 @@ export class TinyToolEngine {
     }
     ctx.on('internal/plugin', (event: any) => scheduleRetry(), { global: true })
     ctx.on('internal/status', (event: any) => scheduleRetry(), { global: true })
-    console.log('[tiny-tool] agents service not available at construction; deferring patch via lifecycle events')
   }
 
   /**
@@ -196,7 +188,6 @@ export class TinyToolEngine {
       return original(decision)
     }
   }
-
 
   /**
    * Return a trimmed copy of the tool schemas: revealed/exempt tools keep their
@@ -235,7 +226,6 @@ export class TinyToolEngine {
     // the real `execute` + canonical `output`. Registering it in the caller's
     // scope shadows that base only for this agent.
     const base = agentTools ? this.ctx.tools.get(name) : undefined
-    console.error(`[tiny-tool] unhideAgentScoped: ${name} | agentTools=${!!agentTools} | base=${!!base} | register=${typeof agentTools?.register}`)
     if (agentTools && base && agentTools.register) {
       agentTools.register(base)
     }
@@ -256,7 +246,6 @@ export class TinyToolEngine {
    */
   private async preExecute(exec: ToolExecution, next: () => Promise<PreToolDecision>): Promise<PreToolDecision> {
     const name = (exec as unknown as ExecLike).name
-    console.error(`[tiny-tool] preExecute: ${name} | catalog.has=${this.catalog.has(name)} | revealed.has=${this.revealed.has(name)} | isExempt=${this.isExempt(name)}`)
     if (!this.catalog.has(name)) return next()
     if (this.revealed.has(name) || this.isExempt(name)) return next()
     // Lazy-reveal: tools with trivial parameters are allowed through on first
@@ -265,11 +254,9 @@ export class TinyToolEngine {
     const entry = this.catalog.get(name)
     if (entry && this.isTrivialParameters(entry.parameters)) {
       this.revealed.add(name)
-      console.error(`[tiny-tool] preExecute: ${name} trivial-param → revealed`)
       return next()
     }
     this.unhideAgentScoped(name, exec)
-    console.error(`[tiny-tool] preExecute: ${name} non-trivial → denied + unhideAgentScoped (revealed now has ${this.revealed.size} entries)`)
     return { kind: 'deny', reason: `${name} is now enabled with its full parameters; call it again with arguments.` }
   }
 
@@ -318,8 +305,7 @@ export class TinyToolEngine {
     try {
       const schemas = toolsAny.schemas(undefined)
       if (Array.isArray(schemas)) sources.push({ label: 'schemas()', schemas })
-    } catch (e) {
-      console.error('[tiny-tool] ctx.tools.schemas() threw:', (e as Error).message)
+    } catch {
     }
 
     // Strategy 2: definitions() returns the raw tool definition objects.
@@ -336,8 +322,7 @@ export class TinyToolEngine {
             })),
           })
         }
-      } catch (e) {
-        console.error('[tiny-tool] ctx.tools.definitions() threw:', (e as Error).message)
+      } catch {
       }
     }
 
@@ -355,12 +340,10 @@ export class TinyToolEngine {
             })),
           })
         }
-      } catch (e) {
-        console.error('[tiny-tool] ctx.tools.view() threw:', (e as Error).message)
+      } catch {
       }
     }
 
-    let count = 0
     for (const source of sources) {
       for (const schema of source.schemas) {
         if (schema.name.startsWith('use_')) continue
@@ -369,18 +352,7 @@ export class TinyToolEngine {
           description: schema.description ?? '',
           parameters: schema.parameters ?? {},
         })
-        count++
       }
-    }
-
-    if (count === 0) {
-      const methods = Object.getOwnPropertyNames(toolsAny).filter(n => typeof (toolsAny as any)[n] === 'function')
-      console.error(
-        `[tiny-tool] WARNING: catalog empty after all fallback strategies. ` +
-        `ctx.tools available methods: ${methods.length ? methods.join(', ') : '(none found — ctx.tools may be inaccessible from this fiber)'}`
-      )
-    } else {
-      console.error(`[tiny-tool] catalog populated via ${sources.map(s => s.label).join(' + ')}: ${count} tools`)
     }
   }
 
