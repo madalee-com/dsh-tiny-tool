@@ -180,7 +180,7 @@ export class TinyToolEngine {
     if (!agent || typeof (agent as any).buildRequest !== 'function') return
     if ((agent as any).__tinyToolPatched) return
     const target = agent as { buildRequest: (...args: unknown[]) => Promise<unknown>; __tinyToolPatched?: boolean }
-    const original = target.buildRequest
+    const original = target.buildRequest.bind(target)
     target.__tinyToolPatched = true
     target.buildRequest = async (...args: unknown[]): Promise<unknown> => {
       const [config, preparedCall, tools] = args as [unknown, unknown, ToolSchema[]]
