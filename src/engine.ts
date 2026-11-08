@@ -206,13 +206,15 @@ export class TinyToolEngine {
   private trimTools(tools: ToolSchema[]): ToolSchema[] {
     this.snapshotCatalog()
     return tools.map(tool => {
+      // Check exempt/revealed FIRST — even if catalog is empty, these keep full schema.
+      const keepFull = this.revealed.has(tool.name) || this.isExempt(tool.name)
+      if (keepFull) {
+        return tool
+      }
       const entry = this.catalog.get(tool.name)
       if (!entry) {
         // Unknown tool: trim to first sentence to avoid leaking any metadata.
         return { name: tool.name, description: extractFirstSentence(tool.description ?? ''), parameters: {} }
-      }
-      if (this.revealed.has(entry.name) || this.isExempt(entry.name)) {
-        return { name: entry.name, description: entry.description, parameters: entry.parameters as Record<string, unknown> }
       }
       return { name: entry.name, description: extractFirstSentence(entry.description), parameters: {} }
     })
@@ -233,6 +235,7 @@ export class TinyToolEngine {
     // the real `execute` + canonical `output`. Registering it in the caller's
     // scope shadows that base only for this agent.
     const base = agentTools ? this.ctx.tools.get(name) : undefined
+    console.error(`[tiny-tool] unhideAgentScoped: ${name} | agentTools=${!!agentTools} | base=${!!base} | register=${typeof agentTools?.register}`)
     if (agentTools && base && agentTools.register) {
       agentTools.register(base)
     }
@@ -253,6 +256,7 @@ export class TinyToolEngine {
    */
   private async preExecute(exec: ToolExecution, next: () => Promise<PreToolDecision>): Promise<PreToolDecision> {
     const name = (exec as unknown as ExecLike).name
+    console.error(`[tiny-tool] preExecute: ${name} | catalog.has=${this.catalog.has(name)} | revealed.has=${this.revealed.has(name)} | isExempt=${this.isExempt(name)}`)
     if (!this.catalog.has(name)) return next()
     if (this.revealed.has(name) || this.isExempt(name)) return next()
     // Lazy-reveal: tools with trivial parameters are allowed through on first
@@ -261,9 +265,11 @@ export class TinyToolEngine {
     const entry = this.catalog.get(name)
     if (entry && this.isTrivialParameters(entry.parameters)) {
       this.revealed.add(name)
+      console.error(`[tiny-tool] preExecute: ${name} trivial-param → revealed`)
       return next()
     }
     this.unhideAgentScoped(name, exec)
+    console.error(`[tiny-tool] preExecute: ${name} non-trivial → denied + unhideAgentScoped (revealed now has ${this.revealed.size} entries)`)
     return { kind: 'deny', reason: `${name} is now enabled with its full parameters; call it again with arguments.` }
   }
 

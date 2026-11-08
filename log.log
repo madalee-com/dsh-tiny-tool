@@ -1,4 +1,4 @@
 [hub] routes mounted (profile=web, loader=provided)
 dsh-pocket: auto-restore check | 自动恢复检查：读取上次隧道状态
-dsh web: http://127.0.0.1:3080/?token=TlbPnDIDBAEUdGIZzHlJFOnGySnpj8pehQU2OAuR7CQ
+dsh web: http://127.0.0.1:3080/?token=RshPcAn7xwo-eAA3o-2hcPeim1t4Y225WNuDR50YYao
 dsh web: opening the default browser; pass --no-open to disable
