@@ -9,6 +9,7 @@
  */
 
 import { Context, symbols } from '@deepseek-ai/cordis'
+import { scopeOf } from '@deepseek-ai/dsh-scope'
 import type { PreToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
 
 export type ToolSchema = { name: string; description: string; parameters: Record<string, unknown> }
@@ -100,7 +101,10 @@ export class TinyToolEngine {
     this.patchToolsService()
     // Reveal-on-execute: intercept calls to unrevealed, managed tools so the
     // tool's full definition can be registered in the calling agent's scope.
-    ctx.on('tools/pre-execute', this.preExecute.bind(this))
+    const boundPreExecute = this.preExecute.bind(this)
+    ctx.on('tools/pre-execute', (exec: ToolExecution, next: () => Promise<PreToolDecision>) => {
+      return boundPreExecute(exec, next)
+    })
   }
 
   /**
@@ -116,7 +120,9 @@ export class TinyToolEngine {
     if (!rawTools || typeof rawTools.definitions !== 'function') return
 
     // Snapshot the full catalog from current global definitions (before trimming).
-    this.snapshotCatalogFrom(rawTools)
+    try {
+      this.snapshotCatalogFrom(rawTools)
+    } catch {}
 
     // Keep the catalog updated for tools registered after apply().
     // NOTE: Wrapping rawTools.register causes a double-registration bug under
@@ -174,7 +180,7 @@ export class TinyToolEngine {
           parameters: d.parameters ?? d.output?.schema?.properties ?? {},
         })
       }
-    } catch {
+    } catch (e) {
       // Best-effort; catalog may be empty if definitions() fails from a child fiber.
     }
   }
@@ -226,16 +232,14 @@ export class TinyToolEngine {
    */
   private async preExecute(exec: ToolExecution, next: () => Promise<PreToolDecision>): Promise<PreToolDecision> {
     const name = (exec as unknown as ExecLike).name
-    if (!this.catalog.has(name)) return next()
-    if (this.revealed.has(name) || this.isExempt(name)) return next()
-    // Lazy-reveal: tools with trivial parameters are allowed through on first
-    // call (no deny/re-assemble), but still marked revealed so their full
-    // description appears on the next assemble.
-    const entry = this.catalog.get(name)
-    if (entry && this.isTrivialParameters(entry.parameters)) {
-      this.revealed.add(name)
-      return next()
-    }
+    // Basic tools are pre-revealed; exempt tools never get trimmed — both pass through.
+    if (this.revealed.has(name) || this.isExempt(name)) { return next() }
+    // Any other tool is managed: fetch its full definition dynamically (the static
+    // catalog may be incomplete if definitions() ran before other plugins registered).
+    const base = this.ctx.tools.get(name) as ToolSchema | undefined
+    if (!base) { return next() }  // unknown/unmanaged — passthrough
+    // Deny once per hidden tool so the host re-assembles with the real schema;
+    // unhide registers the full definition in the caller's agent scope.
     this.unhideAgentScoped(name, exec)
     return { kind: 'deny', reason: `${name} is now enabled with its full parameters; call it again with arguments.` }
   }
@@ -249,25 +253,6 @@ export class TinyToolEngine {
       if (name.startsWith(prefix)) return true
     }
     return false
-  }
-
-  /**
-    * Check whether a tool's schema is effectively empty — no arguments needed.
-    * Handles both bare `{}` and JSON Schema variants like
-    * `{type:'object', properties:{}}` where there are no required fields.
-    */
-  private isTrivialParameters(params: unknown): boolean {
-    if (params == null) return true
-    if (typeof params !== 'object' || Array.isArray(params)) return false
-    const obj = params as Record<string, unknown>
-    // Non-empty `required` array means mandatory args exist.
-    if (Array.isArray(obj.required) && obj.required.length > 0) return false
-    // Non-empty `properties` means named args exist.
-    const props = obj.properties
-    if (props && typeof props === 'object' && !Array.isArray(props)) {
-      if (Object.keys(props as Record<string, unknown>).length > 0) return false
-    }
-    return true
   }
 
 }

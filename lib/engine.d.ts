@@ -84,11 +84,5 @@ export declare class TinyToolEngine {
      * Check if a tool name should be exempt from the trim scheme.
      */
     private isExempt;
-    /**
-      * Check whether a tool's schema is effectively empty — no arguments needed.
-      * Handles both bare `{}` and JSON Schema variants like
-      * `{type:'object', properties:{}}` where there are no required fields.
-      */
-    private isTrivialParameters;
 }
 //# sourceMappingURL=engine.d.ts.map
