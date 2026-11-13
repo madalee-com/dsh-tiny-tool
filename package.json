@@ -1,6 +1,6 @@
 {
   "name": "dsh-tiny-tool",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "Hide all tool/MCP descriptions from the system prompt; expose them on demand via tool_describe",
   "type": "module",
   "main": "lib/index.js",
@@ -50,12 +50,12 @@
     "typescript": true
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/cordis": "4.1.0",
     "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-slots": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-tools": "0.1.5-rc.1",
-    "@deepseek-ai/schemastery": "^3.18.2",
+    "@deepseek-ai/dsh-system-prompt": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.1",
+    "@deepseek-ai/schemastery": "3.19.0",
     "@types/node": "^22.20.2",
     "@types/react": "^18.3.31",
     "react": "^18.3.1",

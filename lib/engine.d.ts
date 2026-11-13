@@ -8,7 +8,6 @@
  * @module dsh-tiny-tool/engine
  */
 import { Context } from '@deepseek-ai/cordis';
-import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt';
 export type ToolSchema = {
     name: string;
     description: string;
@@ -44,34 +43,21 @@ export declare class TinyToolEngine {
     private readonly exemptPrefixes;
     /** Base tool names whose full schema has been revealed to the model this session. */
     private readonly revealed;
-    /** Original AgentLoop.buildRequest, saved for restoration if needed. */
-    private originalBuildRequest?;
     constructor(ctx: Context, config?: TinyToolConfig);
     /**
-     * Monkey-patch `ReactLoopAgent.buildRequest` to trim tool schemas before they
-     * reach the model. Agents are tracked in the `ctx.agents` registry; new agents
-     * enter via `agents.enter(agent, owner)`, and existing agents are retrievable
-     * via `agents.list()`. We patch each ReactLoopAgent's buildRequest when it is
-     * entered, and also patch any already-live agents.
-     *
-     * The traceable proxy's set trap forwards property assignments to the raw
-     * AgentRegistry instance, so patching `ctx.agents.enter` overrides the
-     * internal creation path used by AgentLoop.initializeAgent.
+     * Access the raw (unwrapped) ToolsService through the traceable proxy and
+     * wrap its `definitions` method so managed tools project trimmed schemas to
+     * the model while keeping full definitions for execution and reveal. Also
+     * wraps `register` to keep the catalog fresh for tools added after apply().
      */
-    private patchBuildRequest;
-    /**
-     * Patch a ReactLoopAgent's step method to trim tool schemas in decision.assembly.tools
-     * BEFORE prepareRequest finalizes the config. This avoids the "config changed before
-     * adapter dispatch" error that occurs when tools are modified after config preparation.
-     * Guards against double-patching with a marker property.
-     */
-    private patchAgentStep;
-    /**
-     * Return a trimmed copy of the tool schemas: revealed/exempt tools keep their
-     * full schema, everything else becomes a stub (first-sentence description +
-     * empty parameters) so the model cannot see implementation details.
-     */
-    private trimTools;
+    private patchToolsService;
+    /** True when the current initiator is a subagent (needs full tool schemas). */
+    private isSubagentScope;
+    /** Populate the catalog from a raw ToolsService's global definitions. */
+    private snapshotCatalogFrom;
+    /** Return a shallow clone of `def` with trimmed description and empty parameters,
+     * unless the tool is revealed or exempt (keep full schema). */
+    private trimDefinition;
     /**
      * Reveal a base tool's full schema to exactly the calling agent by registering
      * its full definition in that agent's scope, then mark it revealed for the
@@ -104,24 +90,5 @@ export declare class TinyToolEngine {
       * `{type:'object', properties:{}}` where there are no required fields.
       */
     private isTrivialParameters;
-    /**
-     * Capture the current full tool catalog from the registry.
-     *
-     * Tries multiple fallback strategies because `ctx.tools.schemas()` may throw
-     * or return an empty array when accessed from the plugin's child fiber
-     * context (harness cordis/dsh-* version drift).
-     */
-    private snapshotCatalog;
-    /**
-     * Transform one settled assembly: every non-exempt, non-revealed tool is shown
-     * under its real name with a trimmed description and empty `{}` parameters,
-     * while revealed tools and exempt tools keep their full schema. A model that
-     * calls such a tool unhides it for the rest of the session (see
-     * `preExecute`), where its full schema is re-exposed by the next assembly.
-     * @param assembly - the settled assembly from the waterfall chain.
-     * @param _scope - the calling agent scope (unused).
-     * @returns the transformed assembly.
-     */
-    assemble(assembly: PromptAssembly, _scope?: unknown, next?: (...args: unknown[]) => Promise<PromptAssembly>): Promise<PromptAssembly>;
 }
 //# sourceMappingURL=engine.d.ts.map

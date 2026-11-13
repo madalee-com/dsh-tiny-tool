@@ -28,8 +28,9 @@ export const TinyToolConfigSchema = z.object({
 }).loose()
 
 /**
- * Apply the plugin: snapshot the full catalog, register bridge tools, hook
- * the system-prompt/assemble waterfall, and register settings for UI config.
+ * Apply the plugin: snapshot the full tool catalog, wrap ToolsService so managed
+ * tools project trimmed schemas to the model, hook tools/pre-execute for
+ * reveal-on-call, and register settings for UI config.
  * @param ctx - the plugin context.
  * @param config - plugin configuration (see TinyToolConfig).
  * @returns the engine instance.

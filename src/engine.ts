@@ -9,7 +9,6 @@
  */
 
 import { Context, symbols } from '@deepseek-ai/cordis'
-import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import type { PreToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
 
 export type ToolSchema = { name: string; description: string; parameters: Record<string, unknown> }
@@ -80,9 +79,6 @@ export class TinyToolEngine {
   private readonly exemptPrefixes = new Set<string>()
   /** Base tool names whose full schema has been revealed to the model this session. */
   private readonly revealed = new Set<string>()
-  /** Original AgentLoop.buildRequest, saved for restoration if needed. */
-  private originalBuildRequest?: (...args: [unknown, unknown, ToolSchema[], ...unknown[]]) => Promise<unknown>
-
   constructor(ctx: Context, config: TinyToolConfig = {}) {
     this.ctx = ctx
     if (config.exemptTools) {
@@ -96,119 +92,99 @@ export class TinyToolEngine {
     if (keepTheBasics) {
       for (const name of KEEP_THE_BASICS_TOOLS) this.revealed.add(name)
     }
-    // Register the assemble hook explicitly.
-    ctx.on('system-prompt/assemble', this.assemble.bind(this))
+    // Under 0.2.2-rc.1 the `system-prompt/assemble` hook cannot trim tools:
+    // providers append their schemas AFTER the waterfall, overriding any
+    // hook-set `tools`. Instead we wrap the raw ToolsService's `definitions()`
+    // projection so managed tools are trimmed at schema-project time (no
+    // duplicate entries). Reveal-on-call still works via scoped shadow-registration.
+    this.patchToolsService()
     // Reveal-on-execute: intercept calls to unrevealed, managed tools so the
     // tool's full definition can be registered in the calling agent's scope.
     ctx.on('tools/pre-execute', this.preExecute.bind(this))
-    // Intercept buildRequest at the last point before tools reach the model.
-    // The traceable proxy's set trap forwards to the raw AgentLoop instance,
-    // so patching ctx.agentLoop.buildRequest overrides the internal call.
-    this.patchBuildRequest(ctx)
   }
 
   /**
-   * Monkey-patch `ReactLoopAgent.buildRequest` to trim tool schemas before they
-   * reach the model. Agents are tracked in the `ctx.agents` registry; new agents
-   * enter via `agents.enter(agent, owner)`, and existing agents are retrievable
-   * via `agents.list()`. We patch each ReactLoopAgent's buildRequest when it is
-   * entered, and also patch any already-live agents.
-   *
-   * The traceable proxy's set trap forwards property assignments to the raw
-   * AgentRegistry instance, so patching `ctx.agents.enter` overrides the
-   * internal creation path used by AgentLoop.initializeAgent.
+   * Access the raw (unwrapped) ToolsService through the traceable proxy and
+   * wrap its `definitions` method so managed tools project trimmed schemas to
+   * the model while keeping full definitions for execution and reveal. Also
+   * wraps `register` to keep the catalog fresh for tools added after apply().
    */
-  private patchBuildRequest(ctx: Context): void {
-    let patched = false
+  private patchToolsService(): void {
+    const toolsProxy = this.ctx.tools as any
+    // The traceable proxy exposes its underlying target via symbols.original.
+    const rawTools = toolsProxy?.[symbols.original] ?? toolsProxy
+    if (!rawTools || typeof rawTools.definitions !== 'function') return
 
-    const attempt = (): boolean => {
-      try {
-        const agents = ctx.get('agents') as { enter?: (...args: unknown[]) => unknown; list?: () => unknown[] } | undefined
-        if (!agents) return false
+    // Snapshot the full catalog from current global definitions (before trimming).
+    this.snapshotCatalogFrom(rawTools)
 
-        // Patch existing live agents first.
-        if (Array.isArray(agents.list)) {
-          for (const agent of agents.list()) {
-            this.patchAgentStep(agent)
-          }
+    // Keep the catalog updated for tools registered after apply().
+    const originalRegister = rawTools.register?.bind(rawTools)
+    if (originalRegister) {
+      rawTools.register = (definition: any, options?: any) => {
+        if (definition?.name && !this.catalog.has(definition.name)) {
+          this.catalog.set(definition.name, {
+            name: definition.name,
+            description: definition.description ?? '',
+            parameters: definition.parameters ?? definition.output?.schema?.properties ?? {},
+          })
         }
-
-        // Intercept new agent creation to patch each ReactLoopAgent on entry.
-        const originalEnter = agents.enter as ((agent: unknown, owner?: unknown) => unknown) | undefined
-        if (originalEnter) {
-          (agents as any).enter = (agent: unknown, owner?: unknown): unknown => {
-            this.patchAgentStep(agent)
-            return originalEnter.call(agents, agent, owner)
-          }
-          patched = true
-        }
-        return patched
-      } catch {
-        return false
+        return originalRegister(definition, options)
       }
     }
 
-    if (attempt()) return
-
-    // Defer: agents service may not be available yet. Retry on lifecycle events.
-    let scheduled = false
-    const scheduleRetry = () => {
-      if (patched) return
-      scheduled = true
-      queueMicrotask(() => {
-        scheduled = false
-        attempt()
-      })
-    }
-    ctx.on('internal/plugin', (event: any) => scheduleRetry(), { global: true })
-    ctx.on('internal/status', (event: any) => scheduleRetry(), { global: true })
-  }
-
-  /**
-   * Patch a ReactLoopAgent's step method to trim tool schemas in decision.assembly.tools
-   * BEFORE prepareRequest finalizes the config. This avoids the "config changed before
-   * adapter dispatch" error that occurs when tools are modified after config preparation.
-   * Guards against double-patching with a marker property.
-   */
-  private patchAgentStep(agent: unknown): void {
-    if (!agent || typeof (agent as any).step !== 'function') return
-    if ((agent as any).__tinyToolPatched) return
-    const target = agent as { step: (decision: unknown) => Promise<unknown>; __tinyToolPatched?: boolean }
-    const original = target.step.bind(target)
-    target.__tinyToolPatched = true
-    target.step = async (decision: unknown): Promise<unknown> => {
-      // Trim tools in decision.assembly BEFORE prepareRequest uses them, so both
-      // the prepared config and the request have matching (trimmed) tool schemas.
-      if (decision && typeof decision === 'object') {
-        const assembly = (decision as any).assembly
-        if (assembly && Array.isArray(assembly.tools)) {
-          assembly.tools = this.trimTools(assembly.tools)
-        }
-      }
-      return original(decision)
+    // Trim managed tools at projection time; subagents keep full schemas.
+    const originalDefinitions = rawTools.definitions.bind(rawTools)
+    rawTools.definitions = (scope: unknown, toolSet: unknown) => {
+      const defs = originalDefinitions(scope, toolSet)
+      if (this.isSubagentScope(scope)) return defs
+      return defs.map((def: any) => this.trimDefinition(def))
     }
   }
 
-  /**
-   * Return a trimmed copy of the tool schemas: revealed/exempt tools keep their
-   * full schema, everything else becomes a stub (first-sentence description +
-   * empty parameters) so the model cannot see implementation details.
-   */
-  private trimTools(tools: ToolSchema[]): ToolSchema[] {
-    this.snapshotCatalog()
-    return tools.map(tool => {
-      // Check exempt/revealed FIRST — even if catalog is empty, these keep full schema.
-      const keepFull = this.revealed.has(tool.name) || this.isExempt(tool.name)
-      if (keepFull) {
-        return tool
+  /** True when the current initiator is a subagent (needs full tool schemas). */
+  private isSubagentScope(scope: unknown): boolean {
+    try {
+      const agents = (this.ctx as any).agents
+      if (!agents?.currentInitiator) return false
+      const initiator = agents.currentInitiator()
+      const depth = (initiator?.options as Record<string, unknown>)?.subagentDepth
+        ?? (initiator?.session?.header as Record<string, unknown>)?.delegationDepth
+        ?? 0
+      return (depth as number) > 0
+    } catch {
+      return false
+    }
+  }
+
+  /** Populate the catalog from a raw ToolsService's global definitions. */
+  private snapshotCatalogFrom(rawTools: any): void {
+    try {
+      const defs = rawTools.definitions(undefined)
+      if (!Array.isArray(defs)) return
+      for (const d of defs) {
+        if (!d?.name || d.name.startsWith('use_')) continue
+        this.catalog.set(d.name, {
+          name: d.name,
+          description: d.description ?? '',
+          parameters: d.parameters ?? d.output?.schema?.properties ?? {},
+        })
       }
-      const entry = this.catalog.get(tool.name)
-      if (!entry) {
-        // Unknown tool: trim to first sentence to avoid leaking any metadata.
-        return { name: tool.name, description: extractFirstSentence(tool.description ?? ''), parameters: {} }
-      }
-      return { name: entry.name, description: extractFirstSentence(entry.description), parameters: {} }
-    })
+    } catch {
+      // Best-effort; catalog may be empty if definitions() fails from a child fiber.
+    }
+  }
+
+  /** Return a shallow clone of `def` with trimmed description and empty parameters,
+   * unless the tool is revealed or exempt (keep full schema). */
+  private trimDefinition(def: any): any {
+    if (!def?.name) return def
+    if (this.revealed.has(def.name) || this.isExempt(def.name)) return def
+    return {
+      ...def,
+      description: extractFirstSentence(def.description ?? ''),
+      parameters: {},
+    }
   }
 
   /**
@@ -290,141 +266,4 @@ export class TinyToolEngine {
     return true
   }
 
-  /**
-   * Capture the current full tool catalog from the registry.
-   *
-   * Tries multiple fallback strategies because `ctx.tools.schemas()` may throw
-   * or return an empty array when accessed from the plugin's child fiber
-   * context (harness cordis/dsh-* version drift).
-   */
-  private snapshotCatalog(): void {
-    const toolsAny = this.ctx.tools as any
-    const sources: Array<{ label: string; schemas: ToolSchema[] }> = []
-
-    // Strategy 1: the documented public API.
-    try {
-      const schemas = toolsAny.schemas(undefined)
-      if (Array.isArray(schemas)) sources.push({ label: 'schemas()', schemas })
-    } catch {
-    }
-
-    // Strategy 2: definitions() returns the raw tool definition objects.
-    if (sources.length === 0 && typeof toolsAny.definitions === 'function') {
-      try {
-        const defs = toolsAny.definitions(undefined)
-        if (Array.isArray(defs)) {
-          sources.push({
-            label: 'definitions()',
-            schemas: defs.map((d: any) => ({
-              name: d.name ?? d.output?.name,
-              description: d.description ?? d.output?.description,
-              parameters: d.parameters ?? d.output?.parameters ?? {},
-            })),
-          })
-        }
-      } catch {
-      }
-    }
-
-    // Strategy 3: view().visible is a Map<name, definition>.
-    if (sources.length === 0 && typeof toolsAny.view === 'function') {
-      try {
-        const view = toolsAny.view(undefined)
-        if (view && view.visible instanceof Map) {
-          sources.push({
-            label: 'view().visible',
-            schemas: Array.from(view.visible.values()).map((d: any) => ({
-              name: d.name ?? d.output?.name,
-              description: d.description ?? d.output?.description,
-              parameters: d.parameters ?? d.output?.parameters ?? {},
-            })),
-          })
-        }
-      } catch {
-      }
-    }
-
-    for (const source of sources) {
-      for (const schema of source.schemas) {
-        if (schema.name.startsWith('use_')) continue
-        this.catalog.set(schema.name, {
-          name: schema.name,
-          description: schema.description ?? '',
-          parameters: schema.parameters ?? {},
-        })
-      }
-    }
-  }
-
-  /**
-   * Transform one settled assembly: every non-exempt, non-revealed tool is shown
-   * under its real name with a trimmed description and empty `{}` parameters,
-   * while revealed tools and exempt tools keep their full schema. A model that
-   * calls such a tool unhides it for the rest of the session (see
-   * `preExecute`), where its full schema is re-exposed by the next assembly.
-   * @param assembly - the settled assembly from the waterfall chain.
-   * @param _scope - the calling agent scope (unused).
-   * @returns the transformed assembly.
-   */
-  async assemble(assembly: PromptAssembly, _scope?: unknown, next?: (...args: unknown[]) => Promise<PromptAssembly>): Promise<PromptAssembly> {
-    // Re-snapshot the catalog fresh on each assemble so we capture base tools
-    // registered after apply(), before transforming in place.
-    this.snapshotCatalog()
-    if (this.catalog.size === 0) return assembly
-    // Skip transformation for subagent contexts — they need full tool schemas.
-    let agent: any
-    try {
-      agent = this.ctx.agents?.currentInitiator()
-    } catch {
-      agent = undefined
-    }
-    if (agent !== undefined) {
-      const depth = ((agent.options as Record<string, unknown>)?.subagentDepth ?? (agent.session?.header as unknown as Record<string, unknown>)?.delegationDepth) ?? 0
-      if ((depth as number) > 0) return assembly
-    }
-    // Populate the catalog from the assembly's own tools too, so we can trim any
-    // tool not registered through ctx.tools.register (e.g., remote service
-    // methods like read/write).
-    const tools = assembly.tools ?? []
-    for (const tool of tools) {
-      if (tool.name.startsWith('use_')) continue
-      if (!this.catalog.has(tool.name)) {
-        this.catalog.set(tool.name, {
-          name: tool.name,
-          description: (tool.description ?? '') as string,
-          parameters: (tool.parameters ?? {}) as ToolSchema['parameters'],
-        })
-      }
-    }
-    // Present base tools under their real name: revealed/exempt keep their full
-    // schema; every other managed tool is trimmed to its first sentence with
-    // empty `{}` parameters.
-    const stubbedTools: ToolSchema[] = tools
-      .filter(tool => !tool.name.startsWith('use_'))
-      .map(tool => {
-        const entry = this.catalog.get(tool.name)
-        if (entry === undefined) {
-          const desc = (tool.description ?? '') as string
-          return { name: tool.name, description: extractFirstSentence(desc), parameters: {} }
-        }
-        // Revealed and exempt tools keep their full schema.
-        if (this.revealed.has(entry.name) || this.isExempt(entry.name)) {
-          return { name: entry.name, description: entry.description, parameters: entry.parameters as ToolSchema['parameters'] }
-        }
-        // Otherwise trim to the real name, first sentence, and empty params.
-        return { name: entry.name, description: extractFirstSentence(entry.description), parameters: {} }
-      })
-    // Also include any catalog tools not present in the assembly (edge case).
-    for (const entry of this.catalog.values()) {
-      if (tools.some(t => t.name === entry.name)) continue
-      if (this.revealed.has(entry.name) || this.isExempt(entry.name)) {
-        stubbedTools.push({ name: entry.name, description: entry.description, parameters: entry.parameters as ToolSchema['parameters'] })
-      } else {
-        stubbedTools.push({ name: entry.name, description: extractFirstSentence(entry.description), parameters: {} })
-      }
-    }
-    // Call next() to allow downstream listeners (e.g., mnemon) to run
-    const result = next ? await next(assembly, _scope) : assembly
-    return { ...result, tools: stubbedTools }
-  }
 }

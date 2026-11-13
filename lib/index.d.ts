@@ -17,18 +17,19 @@ export declare const inject: string[];
 /** Settings namespace for plugin configuration. */
 export declare const TINY_TOOL_SETTINGS_NS = "tiny-tool-config";
 /** Schema for the tiny-tool configuration. */
-export declare const TinyToolConfigSchema: z<Schemastery.ObjectS<{
-    exemptTools: z<string[], string[]>;
-    exemptPrefixes: z<string[], string[]>;
-    emptyParameters: z<boolean, boolean>;
-}>, Schemastery.ObjectT<{
-    exemptTools: z<string[], string[]>;
-    exemptPrefixes: z<string[], string[]>;
-    emptyParameters: z<boolean, boolean>;
-}>>;
+export declare const TinyToolConfigSchema: z<Schemastery.ObjectS<NoInfer<{
+    exemptTools: z<string[], string[], "plain">;
+    exemptPrefixes: z<string[], string[], "plain">;
+    emptyParameters: z<boolean, boolean, "defined">;
+}>>, Schemastery.ObjectT<NoInfer<{
+    exemptTools: z<string[], string[], "plain">;
+    exemptPrefixes: z<string[], string[], "plain">;
+    emptyParameters: z<boolean, boolean, "defined">;
+}>>, "plain">;
 /**
- * Apply the plugin: snapshot the full catalog, register bridge tools, hook
- * the system-prompt/assemble waterfall, and register settings for UI config.
+ * Apply the plugin: snapshot the full tool catalog, wrap ToolsService so managed
+ * tools project trimmed schemas to the model, hook tools/pre-execute for
+ * reveal-on-call, and register settings for UI config.
  * @param ctx - the plugin context.
  * @param config - plugin configuration (see TinyToolConfig).
  * @returns the engine instance.
