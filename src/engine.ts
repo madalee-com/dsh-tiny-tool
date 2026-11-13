@@ -238,8 +238,11 @@ export class TinyToolEngine {
     // catalog may be incomplete if definitions() ran before other plugins registered).
     const base = this.ctx.tools.get(name) as ToolSchema | undefined
     if (!base) { return next() }  // unknown/unmanaged — passthrough
-    // Deny once per hidden tool so the host re-assembles with the real schema;
-    // unhide registers the full definition in the caller's agent scope.
+    // Genuinely parameterless tools (no required params) don't need a reveal round-trip;
+    // allow them. Tools whose params were trimmed to {} but originally had required
+    // parameters get denied once so the host re-assembles with the full schema.
+    const hasRequired = Array.isArray(base.parameters?.required) && base.parameters.required.length > 0
+    if (!hasRequired) { return next() }
     this.unhideAgentScoped(name, exec)
     return { kind: 'deny', reason: `${name} is now enabled with its full parameters; call it again with arguments.` }
   }
